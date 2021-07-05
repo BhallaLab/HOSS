@@ -1,0 +1,47 @@
+{
+	"type": "object",
+	"properties": {
+		"developer": {"type": "string"},
+		"model": {"type": "string"},
+		"map": {"type": "string"},
+		"exptDir": {"type": "string"},
+		"scoreFunc": {"type": "string"},
+		"tolerance": {"type": "number"},
+		"HOSS" : {"type": "array",
+			"items": {"type": "object",
+				"properties": {
+					"name": {"type": "string" },
+					"hierarchyLevel": {"type": "number" },
+					"comment": { "type": "string" },
+					"scoreFunc": { "type": "string" }
+				},
+				"required": ["hierarchyLevel"],
+				"additionalProperties": {"type": "object",
+					"properties": {
+						"comment": { "type": "string" },
+						"resultFile": { "type": "string" },
+						"optModelFile": { "type": "string" },
+						"optParamFile": { "type": "string" },
+						"tolerance": { "type": "number" },
+						"expt": {"type": "object",
+							"additionalProperties": { "type": "object",
+								"properties": {
+									"scoreFunc": {"type": "string" },
+									"weight": {"type": "number" },
+									"comment": {"type": "string" }
+								},
+								"required": ["weight"]
+							}
+						},
+						"params": { "type" : "array",
+								"items": { "type": "string" }
+						}
+					},
+					"required": ["expt", "params"]
+				}
+			}
+		}
+	},
+	"required": ["model", "map", "HOSS"]
+
+}

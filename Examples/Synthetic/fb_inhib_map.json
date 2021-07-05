@@ -1,0 +1,6 @@
+{
+	"FileType": "FindSimMap",
+	"Version": "1.0",
+	"input": ["input"],
+	"output": ["output"]
+}

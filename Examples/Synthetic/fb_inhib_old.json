@@ -1,0 +1,25 @@
+{
+	"FileType": "HillTau",
+	"Version": "1.0",
+    "Author": "Upi Bhalla",
+    "Comment": "Conc units are milliMolar, time units are seconds", 
+    "Description": "Feedback inhibition", 
+    "Groups": {
+        "input_g": {
+            "Species": { "input": 0.0 }
+        }, 
+        "output_g": {
+            "Species": { "mol": 1.0 }, 
+            "Reacs": {
+                "output": {
+                    "tau2": 10, "tau": 1, "KA": 0.001, "inhibit": 1, 
+                    "subs": [ "input", "fb", "fb" ]
+                }, 
+                "fb": {
+                    "tau": 40, "KA": 0.2, 
+                    "subs": [ "mol", "output" ]
+                }
+            }
+        }
+    }
+}

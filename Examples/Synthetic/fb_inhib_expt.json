@@ -1,0 +1,78 @@
+{
+	"FileType": "FindSim",
+	"Version": "2.0",
+    "Metadata": {
+        "transcriber": "Upi Bhalla", 
+        "organization": "National Centre for Biological Sciences", 
+        "email": "bhalla@ncbs.res.in", 
+        "source": {
+            "sourceType": "other", 
+            "PMID": 0, 
+            "authors": "", 
+            "journal": "", 
+            "year": 2021, 
+            "figure": ""
+        }, 
+        "testModel": "fb_inhib_old.json", 
+        "testMap": "fb_inhib_map.json"
+    }, 
+    "Experiment": {
+        "design": "TimeSeries", 
+        "species": "synthetic", 
+        "cellType": "in silico", 
+        "temperature": 37, 
+        "notes": "Fig2C"
+    }, 
+    "Stimuli": [
+        {
+            "timeUnits": "sec", 
+            "entity": "input", 
+            "field": "conc", 
+            "quantityUnits": "uM",
+			"data": [
+				[20, 1],
+				[60, 0]
+			]
+        }
+    ], 
+    "Readouts": {
+        "timeUnits": "sec", 
+        "settleTime": 0, 
+        "quantityUnits": "uM", 
+        "entities": [
+            "output"
+        ], 
+        "field": "conc", 
+        "display": {
+            "useXlog": false, 
+            "useYlog": false
+        }, 
+        "data": [
+            [
+                0, 
+                0,
+                0
+            ], 
+            [
+                25,
+                0.755, 
+                0
+            ], 
+            [
+                60, 
+                0.188, 
+                0
+            ], 
+            [
+                100, 
+                0, 
+                0
+            ]
+        ]
+    }, 
+    "Modifications": {
+        "subset": [
+            "all"
+        ]
+    }
+}

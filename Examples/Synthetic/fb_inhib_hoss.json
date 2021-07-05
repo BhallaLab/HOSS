@@ -1,0 +1,26 @@
+{
+	"FileType": "HOSS",
+	"Version": "1.0",
+	"developer": "Upi Bhalla",
+	"model": "fb_inhib_old.json",
+	"map":"fb_inhib_map.json",
+	"exptDir": ".",
+	"scoreFunc": "((expt-sim)*(expt-sim) / (datarange*datarange+1e-9))**0.5",
+	"tolerance": 0.0001,
+	"Comment": "HOSS1 is individual pathway opts.",
+	"HOSS": [
+		{
+			"name": "IndividualPathways", 
+			"hierarchyLevel": 1,
+			"fb_inhib": {
+				"comment": "Each block can be optimized independently in ||",
+				"expt": { 
+					"fb_inhib_expt.json": {"weight": 100}
+					},
+				"params": ["output.KA", "output.tau", "output.tau2", "fb.KA", "fb.tau"],
+				"resultFile": "fb_inhib_opt.txt",
+				"optModelFile": "fb_inhib_opt.json"
+				}
+		}
+	]
+}
