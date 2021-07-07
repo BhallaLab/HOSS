@@ -100,6 +100,9 @@ class EvalFunc:
         self.numCalls = 0
         self.numIter = 0
         self.score = []
+        self.runtime = 0.0
+        self.loadtime = 0.0
+        self.paramAccessTime = 0.0
 
     def procTicker( self, result ):
         if self.showTicker:
@@ -141,6 +144,10 @@ class EvalFunc:
             if val[0] < 0.0:
                 print( "Error: EvalFunc: Negative score on expt '{}'".format( key ) )
                 numFailures += 1
+            else:
+                self.runtime += val[2]["runtime"]
+                self.loadtime += val[2]["loadtime"]
+                self.paramAccessTime += val[2]["paramAccessTime"]
         if numFailures > 0:
             return -1.0
         sumScore = sum([ s*e[1] for s,e in zip(self.score, self.expts) if s>=0.0])
@@ -275,6 +282,7 @@ def main():
 
     print( "\n----------- Completed in {:.3f} sec ---------- ".format(time.time() - t0 ) )
     print( "\n----- Score= {:.4f} ------ ".format(results.fun ) )
+    print( "\nCalls={:5d}  Iter={:3d}  evalTime={:.3f}  loadTime={:.3f}  paramAccessTime={:.3f}".format(ev.numCalls, ev.numIter, ev.runtime, ev.loadtime, ev.paramAccessTime ) )
 
     dumpData = False
     fp = ""
