@@ -35,6 +35,15 @@
 						},
 						"params": { "type" : "array",
 								"items": { "type": "string" }
+						},
+						"paramBounds": { "type" : "object",
+							"additionalProperties": { "type": "array",
+								"items": [
+									{"type": "number"},
+									{"type": "number"},
+									{"enum": [0, 1]}
+								]
+							}
 						}
 					},
 					"required": ["expt", "params"]

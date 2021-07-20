@@ -53,6 +53,71 @@ from multiprocessing import Pool
 
 defaultScoreFunc = "(expt-sim)*(expt-sim) / (datarange*datarange+1e-9)"
 ev = ""
+#algorithm = 'COBYLA'
+ScorePow = 2.0
+
+class Bounds:
+    '''
+    This class maintains bounds for each parameter, and provides for conversions. All inputs are expected to be in the range 0..1. The bounds.func will take the input x in this range and return a value within the bounds. It can use either exponential or linear scaling within the range, exponential is the default. It also has a function to return the inverse transform value, which is useful to get a number between 0..1 for which the Bounds.func will return the starting value of the parameter. For symmetric exponential and symmetric linear ranges, this value is 0.5.
+    '''
+    def __init__( self, lo, hi, isLinear = False ):
+        self.lo = lo
+        self.hi = hi
+        if isLinear:
+            self.range = self.hi - self.lo
+            self.func = self.linBounds
+        else:
+            self.range = np.log( self.hi / self.lo )
+            self.func = self.expBounds
+
+    def linBounds( self, x ): # returns a value linearly between lo and hi
+        return self.smootherstep( x ) * self.range + self.lo
+
+    def expBounds( self, x ): # value exponentially between lo and hi
+        return self.lo * np.exp( self.smootherstep(x) * self.range )
+
+    def invFunc( self, p ): 
+        # func( x in range 0..1 ) = paramValue
+        # So, invFunc( paramValue ) = x in range 0..1
+        if p <= self.lo:
+            return 0.0
+        elif p >= self.hi:
+            return 1.0
+        guess = 0.5
+        lolim = 0.0
+        hilim = 1.0
+        for i in range(20):
+            delta = self.func( guess ) -  p
+            #print( "{}  {}   {}  {}  {} {}".format( i, lolim, hilim, guess, p, abs( delta ) * 1e8 ) )
+            if abs( delta ) < 1e-6 * self.range:
+                return guess
+            if delta > 0:
+                hilim = guess
+                guess = (guess + lolim) / 2.0
+            else:
+                lolim = guess
+                guess = (guess + hilim) / 2.0
+        return guess
+    
+    # A smoother version based on smootherstep.
+    def smootherstep( self, x ):
+        if x < 0.0:
+            x = 0.0
+        elif x > 1.0:
+            x = 1.0
+        x = x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
+        return x
+
+defaultBounds = {
+        "conc":Bounds(1e-9, 100.0), 
+        "concInit":Bounds(1e-9, 100.0),
+        "KA": Bounds(1e-9, 100.0), 
+        "tau": Bounds( 0.1, 2000.0), 
+        "tau2": Bounds( 0.2, 4000.0), 
+        "Kmod": Bounds( 1e-9, 100.0), 
+        "Amod": Bounds( 1e-6, 1e6), 
+        "baseline": Bounds( 1e-9, 100.0),
+        "gain": Bounds( 1e-4, 1e4) }
 
 class DummyResult:
     def __init__(self, num):
@@ -89,8 +154,11 @@ def dumbTicker( result ):
     #sys.stdout.flush()
 
 class EvalFunc:
-    def __init__( self, params, expts, pool, modelFile, mapFile, verbose, showTicker = True ):
+    def __init__( self, params, bounds, expts, pool, modelFile, mapFile, verbose, showTicker = True ):
+        # params specified as list of strings of form object.field 
         self.params = params
+        # paramBounds specified as list of Bounds objects
+        self.paramBounds = bounds
         self.expts = expts # Each expt is ( exptFile, weight, scoreFunc )
         self.pool = pool # pool of available CPUs
         self.modelFile = modelFile
@@ -115,25 +183,35 @@ class EvalFunc:
 
     def doEval( self, x ):
         ret = []
-        assert( len(x) == len( self.params) )
         paramList = []
+        if len( x ) > 0:
+            assert( len(x) == len( self.params) )
 
-        for i, j in zip( self.params, x ):
-            spl = i.rsplit( '.' ,1)
-            assert( len(spl) == 2 )
-            obj, field = spl
-            paramList.append( obj )
-            paramList.append( str(field) )
-            #paramList.append( field.encode( "ascii") )
-            paramList.append( j )
-        #print( "{}".format( paramList ) )
+            for i, j, b in zip( self.params, x, self.paramBounds ):
+                spl = i.rsplit( '.' ,1)
+                assert( len(spl) == 2 )
+                obj, field = spl
+                paramList.append( obj )
+                paramList.append( str(field) )
+                #paramList.append( field.encode( "ascii") )
+                #y = 0.01 + 99.99 / ( 1 + np.exp( -j ) )
+                paramList.append( b.func(j) )
+            #print( "{}".format( paramList ) )
 
-        for k in sorted(self.expts):
-            ret.append( self.pool.apply_async( findSim.innerMain, (k[0],), dict(scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose ), callback = dumbTicker ) )
+        if len( self.expts ) == 1:
+            #print( "DOING IT SERIALLY")
+            k = self.expts[0]
+            ret.append( findSim.innerMain( k[0], scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose ))
+            #print( "RET ===========", ret )
+            self.ret = { e[0]:i for i, e in zip( ret, sorted(self.expts) ) }
+        else:
+            for k in sorted(self.expts):
+                ret.append( self.pool.apply_async( findSim.innerMain, (k[0],), dict(scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose ), callback = dumbTicker ) )
+            #print( "RET ===========", ret )
+            self.ret = { e[0]:i.get() for i, e in zip( ret, sorted(self.expts) ) }
         #print( "  = {} {}".format( len( ret ), ret ) )
         #self.ret = [ i.get() for i in ret ]
         #self.ret = { e[0]:i.get() for i, e in zip( ret, self.expts ) }
-        self.ret = { e[0]:i.get() for i, e in zip( ret, sorted(self.expts) ) }
         #print( "{}".format( self.ret[0] ) )
         self.score = []
         numFailures = 0
@@ -150,9 +228,9 @@ class EvalFunc:
                 self.paramAccessTime += val[2]["paramAccessTime"]
         if numFailures > 0:
             return -1.0
-        sumScore = sum([ s*e[1] for s,e in zip(self.score, self.expts) if s>=0.0])
-        sumWts = sum( [ e[1] for s,e in zip(self.score, self.expts) if s>=0.0 ] )
-        return sumScore/sumWts
+        sumScore = sum([ pow( s, ScorePow )*e[1] for s, e in zip(self.score, self.expts) if s>=0.0])
+        sumWts = sum( [ e[1] for s, e in zip(self.score, self.expts) if s>=0.0 ] )
+        return pow( sumScore/sumWts, 1.0/ScorePow )
 
 def optCallback( x ):
     global ev
@@ -160,7 +238,9 @@ def optCallback( x ):
     if ev.showTicker == False:
         return
     print ("\nIter {}: [".format( ev.numIter ), end = "" )
-    for i in x:
+    #sx = [ sigmoid( j ) for j in x ]
+    sx = x
+    for i in sx:
         print ("{:.3f}  ".format( i ), end = "" )
     print( "]" )
 
@@ -179,7 +259,7 @@ def runOptFromCommandLine( args ):
     #fnames = [ (location + i) for i in os.listdir( args.location ) if i.endswith( ".json" )]
     fnames, weights = enumerateFindSimFiles( args.location )
     expts = zip( fnames, weights, [ defaultScoreFunc ] * len( fnames ) )
-    ret = innerMain( args.parameters, expts, modelFile, args.map, args.verbose, args.tolerance, showTicker = args.show_ticker )
+    ret = innerMain( args.parameters, expts, modelFile, args.map, args.verbose, args.tolerance, showTicker = args.show_ticker, algorithm = args.algorithm )
     clfnames = { key: args[key] for key in ["model", "map", "resultfile", "optfile" ] }
     #return ret + ( args["model"], args["map"] )
     return ret + (clfnames,)
@@ -205,7 +285,7 @@ def runOptFromJson( args ):
         config = json.load( json_file )
     blocks = config["HOSS"]
     basekeys = ["model", "map", "exptDir", "scoreFunc", "tolerance"]
-    baseargs = {"exptDir": "./", "tolerance": 1e-4, "show_ticker": args.show_ticker}
+    baseargs = {"exptDir": "./", "tolerance": 1e-4, "show_ticker": args.show_ticker, "algorithm": args.algorithm}
     v = vars( args )
     for key, val in config.items():
         if key in basekeys:
@@ -251,7 +331,13 @@ def runJson( optName, optDict, args, isVerbose = False ):
         else:
             expts.append( (ed + key, val["weight"], df ) )
     expts = sorted(expts)
-    ret = innerMain( paramArgs, expts, args["model"], args["map"], isVerbose, args["tolerance"], showTicker = args["show_ticker"] )
+    if "paramBounds" in optDict:
+        paramBounds = { key: Bounds(val[0], val[1], val[2]) for key, val in optDict["paramBounds"].items() }
+        #print( "PAAAAAAAAA = " ,paramBounds.keys(), [x.hi for x in paramBounds.values()] )
+    else:
+        paramBounds = {}
+
+    ret = innerMain( paramArgs, expts, args["model"], args["map"], isVerbose, args["tolerance"], showTicker = args["show_ticker"], algorithm = args["algorithm"], paramBounds = paramBounds )
     return ret + ( paramArgs, )
     
 def extractStatus():
@@ -261,13 +347,16 @@ def extractStatus():
 
 def main():
     t0 = time.time()
-    parser = argparse.ArgumentParser( description = 'Script to run a multi-parameter optimization in which each function evaluation is the weighted mean of a set of FindSim evaluations. These evaluations may be run in parallel. The optimiser uses the BGFR method with bounds. Since we are doing relative scaling the bounds are between 0.03 and 30 for Kd, tau, Km, Kmod and gain, and between 0 and 30 for other parameters' )
+    parser = argparse.ArgumentParser( description = 'Script to run a multi-parameter optimization in which each function evaluation is the weighted mean of a set of FindSim evaluations. These evaluations may be run in parallel. The optimiser uses various algorithm available with scipy.optimize, default COBYLA. Since we are doing relative scaling the bounds are between 0.01 and 100 for all parameters' )
     parser.add_argument( 'location', type = str, help='Required: Directory in which the scripts (in json format) are all located. OR: File in which each line is the filename of a scripts.json file, followed by weight to assign for that file. OR: Json file in hoss format, specifying optimization to run. In case there are multiple optimization blocks, it will take the first by default, or the one specified by name using the --optblock argument')
+    parser.add_argument( '-a', '--algorithm', type = str, help='Optional: Algorithm name to use, from the set available to scipy.optimize.minimize. Options are CG, Nelder-Mead, Powell, BFGS, COBYLA, SLSQP, trust-constr. The library has other algorithms but they either require Jacobians or they fail outright. There is also L-BFGS-B which handles bounded solutions, but this is not needed here because we already take care of bounds. COBYLA is the fastest in our experience.', default = "COBYLA" )
     parser.add_argument( '-n', '--numProcesses', type = int, help='Optional: Number of processes to spawn', default = 2 )
     parser.add_argument( '-t', '--tolerance', type = float, help='Optional: Tolerance criterion for completion of minimization', default = 1e-4 )
     parser.add_argument( '-m', '--model', type = str, help='Optional: Composite model definition file. First searched in directory "location", then in current directory.' )
     parser.add_argument( '-map', '--map', type = str, help='Model entity mapping file. This is a JSON file.' )
     parser.add_argument( '-p', '--parameters', nargs='*', default=[],  help='Parameter to vary. Each is defined as an object.field pair. The object is defined as a unique MOOSE name, typically name or parent/name. The field is separated from the object by a period. The field may be concInit for molecules, Kf, Kb, Kd or tau for reactions, and Km or kcat for enzymes. It can additionally be tau2, baseline, gain or Kmod in HillTau. One can specify more than one parameter for a given reaction or enzyme. It is advisable to use Kd and tau for reactions unless you have a unidirectional reaction.' )
+    parser.add_argument( '-pb', '--parameter_bounds', nargs=4, default=[],  help='Set bounds for a parameter. If the parameter is not already included in the list, put it in. The arguments are: object.field lower_bound upper_bound isLinear. [str, float, float, int]. In most cases, isLinear should be 0 to indicate that the system should scale the parameter exponentially. Default values for bounds are concs, baseline, KA and Kmod: 1e-9 to 100, tau: 0.1 to 2000, tau2: 0.2 to 4000, Amod: 1e-6 to 1e6, gain: 1e-4 to 1e4. All default to exponential scaling' )
+    parser.add_argument( '-nb', '--narrow_bounds', nargs=1, help='Set narrow bounds for all parameters to scale up and down by the specified factor' )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of simulation as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-b', '--optblock', type = str, help='Optional: Block name to optimize in case we have loaded a Hoss.json file with multiple optimization blocks.', default = "" )
@@ -296,37 +385,60 @@ def main():
         saveTweakedModelFile( args, paramArgs, results.x, fnames )
         dumpData = False
 
-def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True ):
+def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "COBYLA", paramBounds = {} ):
     global ev
     t0 = time.time()
     pool = Pool( processes = len( expts ) )
 
+    # Some nasty stuff here to get the initial parameters from the model.
+    # Ideally there should be a way to combine with the previous eval.
+    sp = []
+    for p in paramArgs:
+        sp.extend( p.split('.') )
+        sp.append( 1.0 )
+    initParams = findSim.innerMain( expts[0][0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True )
+    #print( "INIT PARAMS = ", initParams )
+
+    # By default, set the bounds in the range of 0.01 to 100x original.
     params = []
     bounds = []
-    for i in paramArgs:
-        spl = i.rsplit( '.',1 )
+    for i, ip in zip( paramArgs, initParams ):
+        spl = i.rsplit( '.',1 ) # i is of the form: object.field
         assert( len(spl) == 2 )
         params.append( i )
-        if spl[1] in ['Kd', 'tau', 'tau2', 'Km', 'KA', 'Kmod', 'gain']:
-            bounds.append( (0.03,30) )
+        pb = paramBounds.get( i )
+        if pb:
+            bounds.append( pb )
         else:
-            bounds.append( (0.01, 30 ) ) # Concs, Kfs and Kbs can be zero.
-    ev = EvalFunc( params, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker )
+            bounds.append( Bounds( ip * 0.01, ip * 100.0 ) )
+            #bounds.append( defaultBounds.get( spl[1] ) )
+            #print( i, bounds[-1].lo, bounds[-1].hi )
+    ev = EvalFunc( params, bounds, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker )
     # Generate the score for each expt for the initial condition
-    ret = ev.doEval( [1.0]* len( params ) )
+    ret = ev.doEval( [] )
     if ret < -0.1: # Got a negative score, ie, run failed somewhere.
         eret = [ { "expt":e[0], "weight":1, "score": ret, "initScore": 0} for e in ev.expts ]
         return ( DummyResult(len(params) ), eret, time.time() - t0 )
-
     initScore = ev.score
+    initVec = [ b.invFunc(p) for b, p in zip( bounds, initParams ) ]
+
     # Do the minimization
-    results = optimize.minimize( ev.doEval, np.ones( len(params) ), method='L-BFGS-B', tol = tolerance, callback = optCallback, bounds = bounds )
+    if algorithm in ['COBYLA']:
+        callback = None
+    else:
+        callback = optCallback
+
+    results = optimize.minimize( ev.doEval, initVec, method= algorithm, tol = tolerance, callback = callback )
     eret = [ { "expt":e[0], "weight":e[1], "score": s, "initScore": i} for e, s, i in zip( sorted(ev.expts), ev.score, initScore ) ]
+    results.x = [ b.func( x ) for x, b in zip( results.x, ev.paramBounds ) ]
+    results.initParams = initParams
     return (results, eret, time.time() - t0 )
 
 def saveTweakedModelFile( args, params, x, fnames ):
     changes = []
-    for s, scale in zip( params, x ):
+    #sx = [ sigmoid( j ) for j in x ]
+    sx = x
+    for s, scale in zip( params, sx ):
         spl = s.rsplit( '.',1 )
         assert( len( spl ) == 2 )
         changes.append( (spl[0], spl[1], scale ) )
@@ -336,21 +448,26 @@ def saveTweakedModelFile( args, params, x, fnames ):
 
 def analyzeResults(fp, dumpData, results, params, eret, optTime):
     assert( len(results.x) == len( params ) )
+    assert( len(results.x) == len( results.initParams ) )
     out = [ "-------------------------------------------------------------"]
     out.append( "Minimization runtime = {:.3f} sec".format( optTime ) )
-    for p,x, in zip(params, results.x):
-        out.append( "Parameter = {:30s}scale = {:.3f}".format(p, x) )
+    #sx = [ sigmoid( j ) for j in results.x ]
+    sx = results.x
+    out.append( "Parameter              Initial Value          Final Value       Ratio ")
+    for p,x,y in zip(params, sx, results.initParams):
+        out.append( "{:20s}{:16.4g}{:16.4g}{:16.4f}".format(p, y, x, x/y) )
     out.append( "\n{:40s}{:>12s}{:>12s}{:>12s}".format( "File", "initScore", "finalScore", "weight" ) )
     initSum = 0.0
     finalSum = 0.0
     numSum = 0.0
     for e in eret:
         out.append( "{:40s}{:12.5f}{:12.5f}{:12.3f}".format( e["expt"], e["initScore"], e["score"], e["weight"] ) )
-        if e["initScore"] >= 0:
-            initSum += e["initScore"] * e["weight"]
-            finalSum += e["score"] * e["weight"]
+        eis = e["initScore"]
+        if eis >= 0:
+            initSum += pow( eis, ScorePow) * e["weight"]
+            finalSum += e["score"] * e["score"] * e["weight"]
             numSum += e["weight"]
-    out.append( "\nInit score = {:.4f}, final = {:.4f}".format(initSum/numSum, results.fun ) )
+    out.append( "\nInit score = {:.4f}, final = {:.4f}".format(pow(initSum/numSum, 1.0/ScorePow), results.fun ) )
     for i in out:
         print( i )
         if dumpData:
