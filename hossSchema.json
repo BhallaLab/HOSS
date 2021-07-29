@@ -1,6 +1,8 @@
 {
 	"type": "object",
 	"properties": {
+		"FileType": {"type": "string"},
+		"Version": {"type": "string"},
 		"developer": {"type": "string"},
 		"model": {"type": "string"},
 		"map": {"type": "string"},

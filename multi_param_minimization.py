@@ -53,7 +53,7 @@ from multiprocessing import Pool
 
 defaultScoreFunc = "(expt-sim)*(expt-sim) / (datarange*datarange+1e-9)"
 ev = ""
-#algorithm = 'COBYLA'
+#algorithm = 'SLSQP'
 ScorePow = 2.0
 
 class Bounds:
@@ -199,7 +199,6 @@ class EvalFunc:
             #print( "{}".format( paramList ) )
 
         if len( self.expts ) == 1:
-            #print( "DOING IT SERIALLY")
             k = self.expts[0]
             ret.append( findSim.innerMain( k[0], scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose ))
             #print( "RET ===========", ret )
@@ -297,7 +296,7 @@ def runOptFromJson( args ):
     #if len( args.resultfile ) == 0 
     for hossLevel in blocks:
         if hossLevel["hierarchyLevel"] == 1:
-            if args.optblock == "":
+            if args.optblock == "": # Just do the first one.
                 for key, val in hossLevel.items():
                     if key != "name" and key != "hierarchyLevel":
                         fn = fnames( baseargs, val, args )
@@ -333,7 +332,6 @@ def runJson( optName, optDict, args, isVerbose = False ):
     expts = sorted(expts)
     if "paramBounds" in optDict:
         paramBounds = { key: Bounds(val[0], val[1], val[2]) for key, val in optDict["paramBounds"].items() }
-        #print( "PAAAAAAAAA = " ,paramBounds.keys(), [x.hi for x in paramBounds.values()] )
     else:
         paramBounds = {}
 
@@ -347,15 +345,15 @@ def extractStatus():
 
 def main():
     t0 = time.time()
-    parser = argparse.ArgumentParser( description = 'Script to run a multi-parameter optimization in which each function evaluation is the weighted mean of a set of FindSim evaluations. These evaluations may be run in parallel. The optimiser uses various algorithm available with scipy.optimize, default COBYLA. Since we are doing relative scaling the bounds are between 0.01 and 100 for all parameters' )
+    parser = argparse.ArgumentParser( description = 'Script to run a multi-parameter optimization in which each function evaluation is the weighted mean of a set of FindSim evaluations. These evaluations may be run in parallel. The optimiser uses various algorithm available with scipy.optimize, default SLSQP. Since we are doing relative scaling the bounds are between 0.01 and 100 for all parameters' )
     parser.add_argument( 'location', type = str, help='Required: Directory in which the scripts (in json format) are all located. OR: File in which each line is the filename of a scripts.json file, followed by weight to assign for that file. OR: Json file in hoss format, specifying optimization to run. In case there are multiple optimization blocks, it will take the first by default, or the one specified by name using the --optblock argument')
-    parser.add_argument( '-a', '--algorithm', type = str, help='Optional: Algorithm name to use, from the set available to scipy.optimize.minimize. Options are CG, Nelder-Mead, Powell, BFGS, COBYLA, SLSQP, trust-constr. The library has other algorithms but they either require Jacobians or they fail outright. There is also L-BFGS-B which handles bounded solutions, but this is not needed here because we already take care of bounds. COBYLA is the fastest in our experience.', default = "COBYLA" )
+    parser.add_argument( '-a', '--algorithm', type = str, help='Optional: Algorithm name to use, from the set available to scipy.optimize.minimize. Options are CG, Nelder-Mead, Powell, BFGS, COBYLA, SLSQP, trust-constr. The library has other algorithms but they either require Jacobians or they fail outright. There is also L-BFGS-B which handles bounded solutions, but this is not needed here because we already take care of bounds. SLSQP works well and is the default.', default = "SLSQP" )
     parser.add_argument( '-n', '--numProcesses', type = int, help='Optional: Number of processes to spawn', default = 2 )
     parser.add_argument( '-t', '--tolerance', type = float, help='Optional: Tolerance criterion for completion of minimization', default = 1e-4 )
     parser.add_argument( '-m', '--model', type = str, help='Optional: Composite model definition file. First searched in directory "location", then in current directory.' )
     parser.add_argument( '-map', '--map', type = str, help='Model entity mapping file. This is a JSON file.' )
     parser.add_argument( '-p', '--parameters', nargs='*', default=[],  help='Parameter to vary. Each is defined as an object.field pair. The object is defined as a unique MOOSE name, typically name or parent/name. The field is separated from the object by a period. The field may be concInit for molecules, Kf, Kb, Kd or tau for reactions, and Km or kcat for enzymes. It can additionally be tau2, baseline, gain or Kmod in HillTau. One can specify more than one parameter for a given reaction or enzyme. It is advisable to use Kd and tau for reactions unless you have a unidirectional reaction.' )
-    parser.add_argument( '-pb', '--parameter_bounds', nargs=4, default=[],  help='Set bounds for a parameter. If the parameter is not already included in the list, put it in. The arguments are: object.field lower_bound upper_bound isLinear. [str, float, float, int]. In most cases, isLinear should be 0 to indicate that the system should scale the parameter exponentially. Default values for bounds are concs, baseline, KA and Kmod: 1e-9 to 100, tau: 0.1 to 2000, tau2: 0.2 to 4000, Amod: 1e-6 to 1e6, gain: 1e-4 to 1e4. All default to exponential scaling' )
+    parser.add_argument( '-pb', '--parameter_bounds', nargs=4, default=[],  help='Set bounds for a parameter. If the parameter is not already included in the list, put it in. The arguments are: object.field lower_bound upper_bound isLinear. [str, float, float, int]. In most cases, isLinear should be 0 to indicate that the system should scale the parameter exponentially. Default values for bounds are concs, baseline, KA and Kmod: 1e-9 to 100, tau: 0.1 to 2000, tau2: 0.2 to 4000, Amod: 1e-6 to 1e6, gain: 1e-4 to 1e4. All default to exponential scaling', metavar = "args" )
     parser.add_argument( '-nb', '--narrow_bounds', nargs=1, help='Set narrow bounds for all parameters to scale up and down by the specified factor' )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of simulation as a table of scale factors and scores.', default = "" )
@@ -385,7 +383,7 @@ def main():
         saveTweakedModelFile( args, paramArgs, results.x, fnames )
         dumpData = False
 
-def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "COBYLA", paramBounds = {} ):
+def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "SLSQP", paramBounds = {} ):
     global ev
     t0 = time.time()
     pool = Pool( processes = len( expts ) )
@@ -396,7 +394,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     for p in paramArgs:
         sp.extend( p.split('.') )
         sp.append( 1.0 )
-    initParams = findSim.innerMain( expts[0][0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True )
+    initParams = findSim.innerMain( expts[0][0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True, ignoreMissingObj = True, silent = True )
     #print( "INIT PARAMS = ", initParams )
 
     # By default, set the bounds in the range of 0.01 to 100x original.
@@ -411,8 +409,8 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
             bounds.append( pb )
         else:
             bounds.append( Bounds( ip * 0.01, ip * 100.0 ) )
-            #bounds.append( defaultBounds.get( spl[1] ) )
             #print( i, bounds[-1].lo, bounds[-1].hi )
+            #bounds.append( defaultBounds.get( spl[1] ) )
     ev = EvalFunc( params, bounds, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker )
     # Generate the score for each expt for the initial condition
     ret = ev.doEval( [] )
