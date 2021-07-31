@@ -55,6 +55,7 @@ defaultScoreFunc = "(expt-sim)*(expt-sim) / (datarange*datarange+1e-9)"
 ev = ""
 #algorithm = 'SLSQP'
 ScorePow = 2.0
+MINIMUM_CONC = 1e-10
 
 class Bounds:
     '''
@@ -67,6 +68,8 @@ class Bounds:
             self.range = self.hi - self.lo
             self.func = self.linBounds
         else:
+            if self.lo < MINIMUM_CONC:
+                self.lo = MINIMUM_CONC
             self.range = np.log( self.hi / self.lo )
             self.func = self.expBounds
 
@@ -459,7 +462,8 @@ def analyzeResults(fp, dumpData, results, params, eret, optTime):
     finalSum = 0.0
     numSum = 0.0
     for e in eret:
-        out.append( "{:40s}{:12.5f}{:12.5f}{:12.3f}".format( e["expt"], e["initScore"], e["score"], e["weight"] ) )
+        exptFile = e["expt"].split[-1]
+        out.append( "{:40s}{:12.5f}{:12.5f}{:12.3f}".format( exptFile, e["initScore"], e["score"], e["weight"] ) )
         eis = e["initScore"]
         if eis >= 0:
             initSum += pow( eis, ScorePow) * e["weight"]
