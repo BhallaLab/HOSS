@@ -462,7 +462,7 @@ def analyzeResults(fp, dumpData, results, params, eret, optTime):
     finalSum = 0.0
     numSum = 0.0
     for e in eret:
-        exptFile = e["expt"].split[-1]
+        exptFile = e["expt"].split('/')[-1]
         out.append( "{:40s}{:12.5f}{:12.5f}{:12.3f}".format( exptFile, e["initScore"], e["score"], e["weight"] ) )
         eis = e["initScore"]
         if eis >= 0:
