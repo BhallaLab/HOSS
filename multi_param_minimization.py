@@ -125,6 +125,7 @@ defaultBounds = {
 class DummyResult:
     def __init__(self, num):
         self.x = [0.0] * num
+        self.initParams = [1.0] * num
         self.fun = -1.0
 
 def enumerateFindSimFiles( location ):
@@ -188,6 +189,8 @@ class EvalFunc:
         ret = []
         paramList = []
         if len( x ) > 0:
+            if len(x) != len( self.params ):
+                print( "pppppppppppp", len(x), "    ", len( self.params ), "    ", self.params )
             assert( len(x) == len( self.params) )
 
             for i, j, b in zip( self.params, x, self.paramBounds ):
@@ -208,6 +211,7 @@ class EvalFunc:
             self.ret = { e[0]:i for i, e in zip( ret, sorted(self.expts) ) }
         else:
             for k in sorted(self.expts):
+                #print ("ssssssssssssssscoreFunc = ", k[2] )
                 ret.append( self.pool.apply_async( findSim.innerMain, (k[0],), dict(scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose ), callback = dumbTicker ) )
             #print( "RET ===========", ret )
             self.ret = { e[0]:i.get() for i, e in zip( ret, sorted(self.expts) ) }
@@ -317,8 +321,13 @@ def runOptFromJson( args ):
     
 
 def runJson( optName, optDict, args, isVerbose = False ):
+    #print( "RJRJRJRJRJ..........", optName, "\n", "\n", args )
     # The optDict is the individual pathway opt spec from the HOSS Json file
     paramArgs = [ i for i in optDict["params"] ]
+    '''
+    eret = [ { "expt":e, "weight":1, "score": 1.0, "initScore": 0} for e in optDict["expt"] ]
+    return ( DummyResult( len( paramArgs ) ), eret, 1.0 ) + (paramArgs, )
+    '''
     #paramArgs = [ i.encode( "ascii") for i in optDict["params"] ]
     if "scoreFunc" in args:
         df = args["scoreFunc"]
@@ -398,7 +407,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
         sp.extend( p.split('.') )
         sp.append( 1.0 )
     initParams = findSim.innerMain( expts[0][0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True, ignoreMissingObj = True, silent = True )
-    #print( "INIT PARAMS = ", initParams )
+    #print( "INIT PARAMS = ", initParams, "\n expt= ", expts[0][0] )
 
     # By default, set the bounds in the range of 0.01 to 100x original.
     params = []
@@ -454,7 +463,7 @@ def analyzeResults(fp, dumpData, results, params, eret, optTime):
     out.append( "Minimization runtime = {:.3f} sec".format( optTime ) )
     #sx = [ sigmoid( j ) for j in results.x ]
     sx = results.x
-    out.append( "Parameter              Initial Value          Final Value       Ratio ")
+    out.append( "Parameter              Initial Value     Final Value          Ratio ")
     for p,x,y in zip(params, sx, results.initParams):
         out.append( "{:20s}{:16.4g}{:16.4g}{:16.4f}".format(p, y, x, x/y) )
     out.append( "\n{:40s}{:>12s}{:>12s}{:>12s}".format( "File", "initScore", "finalScore", "weight" ) )
