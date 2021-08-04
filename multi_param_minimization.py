@@ -56,6 +56,7 @@ ev = ""
 #algorithm = 'SLSQP'
 ScorePow = 2.0
 MINIMUM_CONC = 1e-10
+MIDDLE_CONC = 1e-3
 
 class Bounds:
     '''
@@ -70,6 +71,8 @@ class Bounds:
         else:
             if self.lo < MINIMUM_CONC:
                 self.lo = MINIMUM_CONC
+            if self.hi < MINIMUM_CONC:
+                self.hi = MIDDLE_CONC
             self.range = np.log( self.hi / self.lo )
             self.func = self.expBounds
 
@@ -226,7 +229,7 @@ class EvalFunc:
             val = self.ret[key]
             self.score.append( val[0] )
             if val[0] < 0.0:
-                print( "Error: EvalFunc: Negative score on expt '{}'".format( key ) )
+                print( "Error: EvalFunc: Negative score {} on expt '{}'".format( val[0], key ) )
                 numFailures += 1
             else:
                 self.runtime += val[2]["runtime"]
@@ -420,7 +423,10 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
         if pb:
             bounds.append( pb )
         else:
-            bounds.append( Bounds( ip * 0.01, ip * 100.0 ) )
+            if ip <= 0.0:
+                bounds.append( Bounds( MINIMUM_CONC, MIDDLE_CONC ) )
+            else:
+                bounds.append( Bounds( ip * 0.01, ip * 100.0 ) )
             #print( i, bounds[-1].lo, bounds[-1].hi )
             #bounds.append( defaultBounds.get( spl[1] ) )
     ev = EvalFunc( params, bounds, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker )
@@ -459,13 +465,17 @@ def saveTweakedModelFile( args, params, x, fnames ):
 def analyzeResults(fp, dumpData, results, params, eret, optTime):
     assert( len(results.x) == len( params ) )
     assert( len(results.x) == len( results.initParams ) )
+    sys.stdout.flush()
     out = [ "-------------------------------------------------------------"]
     out.append( "Minimization runtime = {:.3f} sec".format( optTime ) )
     #sx = [ sigmoid( j ) for j in results.x ]
     sx = results.x
     out.append( "Parameter              Initial Value     Final Value          Ratio ")
     for p,x,y in zip(params, sx, results.initParams):
-        out.append( "{:20s}{:16.4g}{:16.4g}{:16.4f}".format(p, y, x, x/y) )
+        if y <= 0.0:
+            out.append( "{:20s}{:16.4g}{:16.4g}{:>16s}".format(p, y, x, "---") )
+        else:
+            out.append( "{:20s}{:16.4g}{:16.4g}{:16.4f}".format(p, y, x, x/y) )
     out.append( "\n{:40s}{:>12s}{:>12s}{:>12s}".format( "File", "initScore", "finalScore", "weight" ) )
     initSum = 0.0
     finalSum = 0.0

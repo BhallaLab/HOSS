@@ -68,7 +68,7 @@ def processResults( retvec, args, baseargs, t0 ):
     for (results, eret, optTime, paramArgs) in retvec:
         multi_param_minimization.analyzeResults( fp, dumpData, results, paramArgs, eret, optTime )
         totScore += results.fun
-    print( "\n----------- Mean Score = {:.3f} ---------- ".format( totScore / len( retvec ) ) ) 
+    print( "\n----------- Mean Score = {:.3f} -- Total Time: {:.3f} s -------- ".format( totScore / len( retvec ), time.time() - t0 ) ) 
 
     if len( args.optfile ) > 2: # at least foo.g
         fnames = { "model": baseargs["model"], "optfile": args.optfile, "map": baseargs["map"], "resultfile": args.resultfile }
