@@ -79,7 +79,7 @@ class Mish:
         if file_extension == ".g":
             self.modelId = moose.loadModel( chem, 'model', 'gsl' )
         elif file_extension == ".xml":
-            seslf.modelId = moose.readSBML( chem, 'model', 'gsl' )
+            self.modelId = moose.readSBML( chem, 'model', 'gsl' )
 
         for i in args.monitor:
             el = moose.wildcardFind( "/model/kinetics/" + i + ",/model/kinetics/##/" + i )
@@ -149,20 +149,21 @@ class Mish:
 
     def doRun(self, x ):
         self.scaleParams( x )
-        t0 = time.time()
         moose.reinit()
         lastt = 0.0
         for stim in self.stimVec:
             #print( "STIM = ", stim.mol, "   ", stim.conc, " ", stim.time )
-            el = moose.wildcardFind( "/model/kinetics/" + stim.mooseMol + ",/model/kinetics/##/" + stim.mooseMol )
-            if len( el ) > 0:
+            objName = self.pathMap.get( stim.mooseMol )
+            if objName:
                 if stim.time > lastt:
+                    t0 = time.time()
                     moose.start( stim.time - lastt )
+                    self.simt += time.time() - t0
                     lastt = stim.time
-                el[0].concInit = stim.conc # assign conc even if no sim advance
+                obj = moose.element( objName )
+                obj.concInit = stim.conc #assign conc even if no sim advance
             else:
                 print( "Warning: Stimulus molecule '{}' not found in MOOSE".format( stim.mooseMol ) )
-        self.simt += time.time() - t0
         #nt = np.transpose( np.array( self.model.plotvec ) )
         #ret = { name:nt[index] for name, index in self.plotnum.items() }
         vecs = { i.name:i.vector for i in moose.wildcardFind("/model/tabs/#") }
@@ -195,40 +196,13 @@ class Mish:
         return self.doScore( ret )
 
     def dumpScaledFile( self, x, fname ):
-        # This is significantly more complicated because the values may
-        # be specified in the Constants section of the file.
-        jd = self.jsonDict
-        consts = jd.get( "Constants", {} )
-        # Scale back to original units
-        hillTau.scaleDict( jd, 1.0/hillTau.getQuantityScale( jd ) )
-        # Scale each of the parameters
-        for i, scaleFactor in zip( self.params, x ):
-            spl = i.rsplit( '.' ,1)
-            assert( len(spl) == 2 )
-            obj, field = spl
-            if field == "concInit":
-                mi = self.model.molInfo[ obj ]
-                concInit = jd["Groups"][ mi.grp ][ "Species" ][ mi.name ] 
-                if isinstance( concInit, str ):
-                    if not concInit in consts:
-                        raise( ValueError( "Error: Constant {} not found".format( concInit ) ) )
-                    else:
-                        consts[ concInit ] *= scaleFactor
-                else:
-                    jd["Groups"][ mi.grp ][ "Species" ][ mi.name ] = concInit * scaleFactor
-            else:
-                ri = self.model.reacInfo[ obj ]
-                orig = jd["Groups"][ ri.grp ][ "Reacs" ][obj][field]
-                if isinstance( orig, str ):
-                    if not orig in consts:
-                        raise( ValueError( "Error: Constant {} not found".format( concInit ) ) )
-                    else:
-                        consts[ orig ] *= scaleFactor
-                else:
-                    jd["Groups"][ ri.grp ]["Reacs"][obj][field] = orig * scaleFactor
-
-        with open( fname, 'w' ) as f:
-            json.dump( jd, f, indent = 4 )
+        self.scaleParams( x )
+        print( "Saving optimized model to: ", fname )
+        filename, file_extension = os.path.splitext(fname)
+        if file_extension == ".g":
+            moose.writeKkit( "/model", fname )
+        elif file_extension == ".xml":
+            moose.writeSBML( "/model", fname )
 
 # Callback function for minimizer. Just prints out dots.
 def dotter():
@@ -286,7 +260,7 @@ def runHillTau( ht, stimVec, outMols ):
         lastt = stim.time
     #nt = np.transpose( np.array( self.model.plotvec ) )
     #ret = { name:nt[index] for name, index in self.plotnum.items() }
-    ret = { name:model.getConcVec( index ) for name, index in outMolIndex.items() }
+    ret = { name:np.array(model.getConcVec( index )) for name, index in outMolIndex.items() }
     return ret
 
 def runMoose( chem, stimVec, outMols ):
@@ -524,9 +498,10 @@ def main():
     ret = minimize( mish.doEval, x0, method = "L-BFGS-B", tol = args.tolerance, bounds = bounds, callback = iterPrint )
 
     finalRet = mish.doRun( ret.x )
-    print( "\n{:20s}   {}".format( "Object.field", "Scale factor" ) )
+    print( "\n{:25s}  {}".format( "Object.field", "Scale factor" ) )
     for i, j in zip( mish.params, ret.x ):
-        print( "{:20s}  {:4f}".format( i, j ) )
+        k = i.rsplit( "/" )[-1]
+        print( "{:25s}  {:4f}".format( k, j ) )
 
     print( "Timings: reference= {:.4f}s, optimization= {:.2f}s, MOOSE Cumulative = {:.2f}s \nNumber of evaluations = {}, number of optimization iterations = {}, \nInitial score = {:3g}, Final score = {:3g}".format( t1 - t0, time.time() - t1, mish.simt, mish.numIter, ret.nit,  mish.doScore( initRet ), ret.fun ) )
 
@@ -537,12 +512,14 @@ def main():
     if args.plot:
         for name, ref in referenceOutputs.items():
             hname = mish.molMap[ name ]
+            print( name, hname )
             fig = plt.figure( figsize = (6,6), facecolor='white' )
             ax = plotBoilerplate( xlabel = "Time (s)", title = hname )
             x = np.array( range( len( ref ) ) ) * plotDt
-            ax.plot( x , 1000.0 * ref, label = "Mass action" )
-            ax.plot( x , 1000.0 * np.array( initRet[hname] ), label = "HillTau" )
-            ax.plot( x , 1000.0 * np.array( finalRet[hname] ), label = "HillTau opt" )
+            ax.plot( x , 1000.0 * ref, label = "HillTau" )
+            x = np.array( range( len( initRet[hname] ) ) ) * plotDt
+            ax.plot( x, 1000.0 * initRet[hname], label = "MOOSE orig" )
+            ax.plot( x, 1000.0 * np.array( finalRet[hname] ), label = "MOOSE opt" )
             ax.legend()
         plt.show()
 
