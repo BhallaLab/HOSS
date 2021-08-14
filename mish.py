@@ -17,7 +17,7 @@
 
 '''
 *******************************************************************
- * File:            mish2.py
+ * File:            mish.py
  * Description:
  * Author:          Upinder S. Bhalla
  * E-mail:          bhalla@ncbs.res.in
@@ -25,7 +25,7 @@
 
 /**********************************************************************
 ** This program uses HILLTAU and MOOSE and optimizes parameters of the
-** HILLTAU model to fit the MOOSE one.
+** MOOSE model to fit the HILLTAU one.
 **           copyright (C) 2021 Upinder S. Bhalla. and NCBS
 **********************************************************************/
 '''
@@ -451,11 +451,11 @@ def oldparseStims( stimArg, builtin, cyclic, doser ):
     return sorted( stimVec, key = lambda x: x.time )
 
 def getMooseName( name ):
-    sp = name.split( '/' )
+    sp = name.split( ':' )
     return sp[0]
 
 def getHillTauName( name ):
-    sp = name.split( '/' )
+    sp = name.split( ':' )
     if len(sp ) == 1:
         return name
     else:
@@ -467,11 +467,11 @@ def main():
     parser = argparse.ArgumentParser( description = "Optimizes chemical kinetic (mass action and Michaelis-Menten) models of chemical signalling to fit a HillTau model." )
     parser.add_argument( "chemModel", type = str, help = "Required: Filepath for chemical kinetic model" )
     parser.add_argument( "HillTauModel", type=str, help = "Required: Filepath for HillTau model" )
-    parser.add_argument( "-m", "--monitor", type = str, nargs = '+', metavar = "molName", help = "Optional: Molecules to monitor, as a list of space-separated names. If names differ between chemical and HillTau models, both can be specified, separated by a slash. Example: Ca/Calcium.", default = ["output"] )
-    parser.add_argument( '-b', '--builtin', nargs = 3, metavar = ('molecule', 'midconc', 'midtime'), action='append', help='Optional: Deliver builtin stimulus. This is a dose-response centered around midconc, with a settling time of midtime * 10. This is followed by a timeseries of square-wave pulses from 0 to midconc, with on-time of midtime/10 followed by another with on-time of midtime. The first runs for 170 cycles and the second for 17. If multiple builtin stimuli are specified, they will be executed in order, without overlap. If molecule names are different between chem and HillTau models, they should be separated by a slash.', default = [] )
-    parser.add_argument( '-c', '--cyclic', nargs = 5, metavar = ('molecule', 'conc', 'onTime', 'offTime', 'num_cycles'), action='append', help='Optional: Deliver cyclic stimulus. This is a timeseries of rectangular pulses from 0 to conc, with an onTime and offTime as specified, repeated for num_cycles. Before the first cycle, and after the last cycle it runs for another "offTime" seconds at conc = 0. If molecule names are different between chem and HillTau models, they should be separated by a slash.', default = [] )
-    parser.add_argument( '-d', '--dose_response', nargs = 3, metavar = ('molecule', 'midconc', 'settle_time'), action='append', help='Optional: Deliver dose-response stimulus centered around midconc, with a settling time of settle_time. If other builtin, cyclic or dose_response stimuli are specified, they will be executed in order, without overlap. If molecule names are different between chem and HillTau models, they should be separated by a slash.', default = [] )
-    parser.add_argument( "-a", "--addParams", type = str, nargs = "+", metavar = "obj.field", help = "Optional: Add parameter list. This will remove all the automatic ones obtained by scanning through the model, and only use the added ones from this list. Each parameter is of the form object.field. Any number of parameters can be added, separated by spaces. If molecule names are different between chem and HillTau models, they should be separated by a slash", default = [] ) 
+    parser.add_argument( "-m", "--monitor", type = str, nargs = '+', metavar = "molName", help = "Optional: Molecules to monitor, as a list of space-separated names. If names differ between chemical and HillTau models, both can be specified, separated by a colon. Example: Ca:Calcium.", default = ["output"] )
+    parser.add_argument( '-b', '--builtin', nargs = 3, metavar = ('molecule', 'midconc', 'midtime'), action='append', help='Optional: Deliver builtin stimulus. This is a dose-response centered around midconc, with a settling time of midtime * 10. This is followed by a timeseries of square-wave pulses from 0 to midconc, with on-time of midtime/10 followed by another with on-time of midtime. The first runs for 170 cycles and the second for 17. If multiple builtin stimuli are specified, they will be executed in order, without overlap. If molecule names are different between chem and HillTau models, they should be separated by a colon.', default = [] )
+    parser.add_argument( '-c', '--cyclic', nargs = 5, metavar = ('molecule', 'conc', 'onTime', 'offTime', 'num_cycles'), action='append', help='Optional: Deliver cyclic stimulus. This is a timeseries of rectangular pulses from 0 to conc, with an onTime and offTime as specified, repeated for num_cycles. Before the first cycle, and after the last cycle it runs for another "offTime" seconds at conc = 0. If molecule names are different between chem and HillTau models, they should be separated by a colon.', default = [] )
+    parser.add_argument( '-d', '--dose_response', nargs = 3, metavar = ('molecule', 'midconc', 'settle_time'), action='append', help='Optional: Deliver dose-response stimulus centered around midconc, with a settling time of settle_time. If other builtin, cyclic or dose_response stimuli are specified, they will be executed in order, without overlap. If molecule names are different between chem and HillTau models, they should be separated by a colon.', default = [] )
+    parser.add_argument( "-a", "--addParams", type = str, nargs = "+", metavar = "obj.field", help = "Optional: Add parameter list. This will remove all the automatic ones obtained by scanning through the model, and only use the added ones from this list. Each parameter is of the form object.field. Any number of parameters can be added, separated by spaces. If molecule names are different between chem and HillTau models, they should be separated by a colon", default = [] ) 
     parser.add_argument( "-r", "--removeParams", type = str, nargs = "+", metavar = "param", help= "Optional: Remove parameters from the default ones which were generated automatically by scanning all the reactions in the model. Each parameter is of the form object.field. Any number of parameters can be specified, separated by spaces.", default = [] )
     parser.add_argument( '-s', '--stimulus', type = str, nargs = '+', metavar = 'args', action='append', help='Optional: Deliver stimulus as follows: --stimulus molecule conc time [conc time]... Each stimulus molecule may be followed by one or more [conc time] pairs. Any number of stimuli may be given, each indicated by --stimulus. Stimuli can overlap with the builtin stimuli, the values will apply from the time they are given till the builtin protocol delivers its own stimulus to override them.', default = [] )
     parser.add_argument( '-p', '--plot', action='store_true', help='Flag: when set, it plots the chem output, the original HillTau output, and the optimized HillTau output')
