@@ -461,38 +461,21 @@ def getHillTauName( name ):
     else:
         return sp[1]
 
-def main():
-    global plotDt
-    stimDict = {}
-    parser = argparse.ArgumentParser( description = "Optimizes chemical kinetic (mass action and Michaelis-Menten) models of chemical signalling to fit a HillTau model." )
-    parser.add_argument( "chemModel", type = str, help = "Required: Filepath for chemical kinetic model" )
-    parser.add_argument( "HillTauModel", type=str, help = "Required: Filepath for HillTau model" )
-    parser.add_argument( "-m", "--monitor", type = str, nargs = '+', metavar = "molName", help = "Optional: Molecules to monitor, as a list of space-separated names. If names differ between chemical and HillTau models, both can be specified, separated by a colon. Example: Ca:Calcium.", default = ["output"] )
-    parser.add_argument( '-b', '--builtin', nargs = 3, metavar = ('molecule', 'midconc', 'midtime'), action='append', help='Optional: Deliver builtin stimulus. This is a dose-response centered around midconc, with a settling time of midtime * 10. This is followed by a timeseries of square-wave pulses from 0 to midconc, with on-time of midtime/10 followed by another with on-time of midtime. The first runs for 170 cycles and the second for 17. If multiple builtin stimuli are specified, they will be executed in order, without overlap. If molecule names are different between chem and HillTau models, they should be separated by a colon.', default = [] )
-    parser.add_argument( '-c', '--cyclic', nargs = 5, metavar = ('molecule', 'conc', 'onTime', 'offTime', 'num_cycles'), action='append', help='Optional: Deliver cyclic stimulus. This is a timeseries of rectangular pulses from 0 to conc, with an onTime and offTime as specified, repeated for num_cycles. Before the first cycle, and after the last cycle it runs for another "offTime" seconds at conc = 0. If molecule names are different between chem and HillTau models, they should be separated by a colon.', default = [] )
-    parser.add_argument( '-d', '--dose_response', nargs = 3, metavar = ('molecule', 'midconc', 'settle_time'), action='append', help='Optional: Deliver dose-response stimulus centered around midconc, with a settling time of settle_time. If other builtin, cyclic or dose_response stimuli are specified, they will be executed in order, without overlap. If molecule names are different between chem and HillTau models, they should be separated by a colon.', default = [] )
-    parser.add_argument( "-a", "--addParams", type = str, nargs = "+", metavar = "obj.field", help = "Optional: Add parameter list. This will remove all the automatic ones obtained by scanning through the model, and only use the added ones from this list. Each parameter is of the form object.field. Any number of parameters can be added, separated by spaces. If molecule names are different between chem and HillTau models, they should be separated by a colon", default = [] ) 
-    parser.add_argument( "-r", "--removeParams", type = str, nargs = "+", metavar = "param", help= "Optional: Remove parameters from the default ones which were generated automatically by scanning all the reactions in the model. Each parameter is of the form object.field. Any number of parameters can be specified, separated by spaces.", default = [] )
-    parser.add_argument( '-s', '--stimulus', type = str, nargs = '+', metavar = 'args', action='append', help='Optional: Deliver stimulus as follows: --stimulus molecule conc time [conc time]... Each stimulus molecule may be followed by one or more [conc time] pairs. Any number of stimuli may be given, each indicated by --stimulus. Stimuli can overlap with the builtin stimuli, the values will apply from the time they are given till the builtin protocol delivers its own stimulus to override them.', default = [] )
-    parser.add_argument( '-p', '--plot', action='store_true', help='Flag: when set, it plots the chem output, the original HillTau output, and the optimized HillTau output')
-    parser.add_argument( "-t", "--tolerance", type = float, help = "Optional: tolerance for convergence of optimization.", default = 1.0e-6 )
-    parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized SBML model. If not set, no file is saved.', default = "" )
-    args = parser.parse_args()
-
-    if len( args.builtin ) > 0:
-        plotDt = min( plotDt, float( args.builtin[0][2] ) * stimRange[0] * 0.2 )
-    stimVec = parseStims( args.stimulus, args.builtin, args.cyclic, args.dose_response )
-    t0 = time.time()
-    referenceOutputs = runHillTau( args.HillTauModel, stimVec, args.monitor )
-    t1 = time.time()
-    print( "Completed reference run of '{}' in {:.5f}s".format( args.HillTauModel, t1 -t0 ) )
-
-    mish = Mish( args.chemModel, referenceOutputs, args, stimVec )
-    
+def runMishOptimization( mish, args ):
     initParams = np.ones( len( mish.params ) )
+    t0 = time.time()
     initRet = mish.doRun( initParams )
-    bounds = [(0.01, 100.0)] * len( mish.params )
+    if args.checkInit:
+        print( "Initial MOOSE run took {:.3f} seconds".format( time.time() - t0 ) )
+        print( "Number of Parameters= {}".format( len( mish.params )) )
+        if len( mish.params ) > 15:
+            print( "More than 15 Parameters is a Bad Idea. Suggest you remove some." )
+        for i in mish.params:
+            k = i.rsplit( "/" )[-1]
+            print( "{:25s}".format( k ) )
+        return initRet, initRet
 
+    bounds = [(0.01, 100.0)] * len( mish.params )
     x0 = initParams
 
     ret = minimize( mish.doEval, x0, method = "L-BFGS-B", tol = args.tolerance, bounds = bounds, callback = iterPrint )
@@ -508,11 +491,42 @@ def main():
     if len( args.optfile ) > 0:
         mish.dumpScaledFile( ret.x, args.optfile )
 
+    return initRet, finalRet
+
+
+def main():
+    global plotDt
+    stimDict = {}
+    parser = argparse.ArgumentParser( description = "Optimizes chemical kinetic (mass action and Michaelis-Menten) models of chemical signalling to fit a HillTau model." )
+    parser.add_argument( "chemModel", type = str, help = "Required: Filepath for chemical kinetic model" )
+    parser.add_argument( "HillTauModel", type=str, help = "Required: Filepath for HillTau model" )
+    parser.add_argument( "-m", "--monitor", type = str, nargs = '+', metavar = "molName", help = "Optional: Molecules to monitor, as a list of space-separated names. If names differ between chemical and HillTau models, both can be specified, separated by a colon. Example: Ca:Calcium.", default = ["output"] )
+    parser.add_argument( '-b', '--builtin', nargs = 3, metavar = ('molecule', 'midconc', 'midtime'), action='append', help='Optional: Deliver builtin stimulus. This is a dose-response centered around midconc, with a settling time of midtime * 10. This is followed by a timeseries of square-wave pulses from 0 to midconc, with on-time of midtime/10 followed by another with on-time of midtime. The first runs for 170 cycles and the second for 17. If multiple builtin stimuli are specified, they will be executed in order, without overlap. If molecule names are different between chem and HillTau models, they should be separated by a colon.', default = [] )
+    parser.add_argument( '-c', '--cyclic', nargs = 5, metavar = ('molecule', 'conc', 'onTime', 'offTime', 'num_cycles'), action='append', help='Optional: Deliver cyclic stimulus. This is a timeseries of rectangular pulses from 0 to conc, with an onTime and offTime as specified, repeated for num_cycles. Before the first cycle, and after the last cycle it runs for another "offTime" seconds at conc = 0. If molecule names are different between chem and HillTau models, they should be separated by a colon.', default = [] )
+    parser.add_argument( '-d', '--dose_response', nargs = 3, metavar = ('molecule', 'midconc', 'settle_time'), action='append', help='Optional: Deliver dose-response stimulus centered around midconc, with a settling time of settle_time. If other builtin, cyclic or dose_response stimuli are specified, they will be executed in order, without overlap. If molecule names are different between chem and HillTau models, they should be separated by a colon.', default = [] )
+    parser.add_argument( "-a", "--addParams", type = str, nargs = "+", metavar = "obj.field", help = "Optional: Add parameter list. This will remove all the automatic ones obtained by scanning through the model, and only use the added ones from this list. Each parameter is of the form object.field. Any number of parameters can be added, separated by spaces. If molecule names are different between chem and HillTau models, they should be separated by a colon", default = [] ) 
+    parser.add_argument( "-r", "--removeParams", type = str, nargs = "+", metavar = "param", help= "Optional: Remove parameters from the default ones which were generated automatically by scanning all the reactions in the model. Each parameter is of the form object.field. Any number of parameters can be specified, separated by spaces.", default = [] )
+    parser.add_argument( '-s', '--stimulus', type = str, nargs = '+', metavar = 'args', action='append', help='Optional: Deliver stimulus as follows: --stimulus molecule conc time [conc time]... Each stimulus molecule may be followed by one or more [conc time] pairs. Any number of stimuli may be given, each indicated by --stimulus. Stimuli can overlap with the builtin stimuli, the values will apply from the time they are given till the builtin protocol delivers its own stimulus to override them.', default = [] )
+    parser.add_argument( '-ci', '--checkInit', action='store_true', help='Flag: when set, only do the initial run for the MOOSE model, to see if the stimuli are doing what we expect.')
+    parser.add_argument( '-p', '--plot', action='store_true', help='Flag: when set, it plots the chem output, the original HillTau output, and the optimized HillTau output')
+    parser.add_argument( "-t", "--tolerance", type = float, help = "Optional: tolerance for convergence of optimization.", default = 1.0e-6 )
+    parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized SBML model. If not set, no file is saved.', default = "" )
+    args = parser.parse_args()
+
+    if len( args.builtin ) > 0:
+        plotDt = min( plotDt, float( args.builtin[0][2] ) * stimRange[0] * 0.2 )
+    stimVec = parseStims( args.stimulus, args.builtin, args.cyclic, args.dose_response )
+    t0 = time.time()
+    referenceOutputs = runHillTau( args.HillTauModel, stimVec, args.monitor )
+    t1 = time.time()
+    print( "Completed reference run of '{}' in {:.5f}s".format( args.HillTauModel, t1 -t0 ) )
+
+    mish = Mish( args.chemModel, referenceOutputs, args, stimVec )
+    initRet, finalRet = runMishOptimization( mish, args )
 
     if args.plot:
         for name, ref in referenceOutputs.items():
             hname = mish.molMap[ name ]
-            print( name, hname )
             fig = plt.figure( figsize = (6,6), facecolor='white' )
             ax = plotBoilerplate( xlabel = "Time (s)", title = hname )
             x = np.array( range( len( ref ) ) ) * plotDt
