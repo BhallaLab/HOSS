@@ -83,10 +83,11 @@ class Mish:
         moose.le( "/model/kinetics" )
 
         for i in args.monitor:
-            el = moose.wildcardFind( "/model/kinetics/" + i + ",/model/kinetics/##/" + i )
+            mooseName = getMooseName( i )
+            el = moose.wildcardFind( "/model/kinetics/" + mooseName + ",/model/kinetics/##/" + mooseName )
             if len( el ) == 0:
-                raise( ValueError( "Output molecule '{}' not found".format(i) ) )
-            self.pathMap[i] = el[0].path
+                raise( ValueError( "Output molecule '{}' not found".format(mooseName) ) )
+            self.pathMap[mooseName] = el[0].path
         for i in stimVec:
             el = moose.wildcardFind( "/model/kinetics/" + i.mooseMol + ",/model/kinetics/##/" + i.mooseMol )
             if len( el ) == 0:
@@ -95,14 +96,15 @@ class Mish:
 
         tabs = moose.Neutral( "/model/tabs" )
         for i in args.monitor:
-            el = moose.wildcardFind( "/model/kinetics/" + i + ",/model/kinetics/##/" + i )
+            mooseName = getMooseName( i )
+            el = moose.wildcardFind( "/model/kinetics/" + mooseName + ",/model/kinetics/##/" + mooseName )
             if len( el ) > 0:
                 # Make an output table
-                tab = moose.Table2( "/model/tabs/" + i )
+                tab = moose.Table2( "/model/tabs/" + mooseName )
                 moose.connect( tab, "requestOut", el[0], "getConc" )
                 #print( "Making output for {} on {}".format( el[0].path, tab.path ) )
             else:
-                raise( ValueError( "Error: Molecule '{}' not found in moose model: {}".format( i, chem ) ) )
+                raise( ValueError( "Error: Molecule '{}' not found in moose model: {}".format( mooseName, chem ) ) )
                 
         for i in range( 10, 20 ):
             moose.setClock( i, plotDt )
@@ -470,11 +472,7 @@ def getMooseName( name ):
     return sp[0]
 
 def getHillTauName( name ):
-    sp = name.split( ':' )
-    if len(sp ) == 1:
-        return name
-    else:
-        return sp[1]
+    return name.split( ':' )[-1]
 
 def runMishOptimization( mish, args, t1, t0 ):
     initParams = np.ones( len( mish.params ) )
@@ -531,7 +529,9 @@ def main():
         plotDt = min( plotDt, float( args.builtin[0][2] ) * stimRange[0] * 0.2 )
     stimVec = parseStims( args.stimulus, args.builtin, args.cyclic, args.dose_response )
     t0 = time.time()
-    referenceOutputs = runHillTau( args.HillTauModel, stimVec, args.monitor )
+
+    htMonitor = [ getHillTauName(h) for h in args.monitor ]
+    referenceOutputs = runHillTau( args.HillTauModel, stimVec, htMonitor )
     t1 = time.time()
     print( "Completed reference run of '{}' in {:.5f}s".format( args.HillTauModel, t1 -t0 ) )
 
