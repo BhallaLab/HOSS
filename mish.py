@@ -80,6 +80,7 @@ class Mish:
             self.modelId = moose.loadModel( chem, 'model', 'gsl' )
         elif file_extension == ".xml":
             self.modelId = moose.readSBML( chem, 'model', 'gsl' )
+        moose.le( "/model/kinetics" )
 
         for i in args.monitor:
             el = moose.wildcardFind( "/model/kinetics/" + i + ",/model/kinetics/##/" + i )
@@ -99,6 +100,7 @@ class Mish:
                 # Make an output table
                 tab = moose.Table2( "/model/tabs/" + i )
                 moose.connect( tab, "requestOut", el[0], "getConc" )
+                #print( "Making output for {} on {}".format( el[0].path, tab.path ) )
             else:
                 raise( ValueError( "Error: Molecule '{}' not found in moose model: {}".format( i, chem ) ) )
                 
@@ -107,12 +109,23 @@ class Mish:
         moose.reinit()
         self.params = self.extractParams(args.addParams, args.removeParams)
 
+    def findMooseObjectsOnTree( self, objNameList ):
+        ### Return dict of full paths with key as the object name.
+        ret = {}
+        for i in objNameList:
+            [j, k] = i.rsplit( '.', 1 )
+            el = moose.wildcardFind( "/model/kinetics/" + j + ",/model/kinetics/##/" + j )
+            if len( el ) > 0:
+                ret[ i ] = el[0].path + '.' + k
+        return ret
+
+
     def extractParams( self, add, remove ):
         if len( add ) > 0:
-            pv = add
+            pv = [ v for v in self.findMooseObjectsOnTree( add ).values()]
         else:
             pv = []
-            el = moose.wildcardFind( "/model/kinetics/##[ISA=Pool]" )
+            el = moose.wildcardFind( "/model/kinetics/##[ISA=PoolBase]" )
             for i in el:
                 pv.append( i.path + ".concInit" )
             el = moose.wildcardFind( "/model/kinetics/##[ISA=Reac]" )
@@ -123,7 +136,8 @@ class Mish:
             for i in el:
                 pv.append( i.path + ".kcat" )
                 pv.append( i.path + ".Km" )
-        for i in remove:
+        rem = [ v for v in self.findMooseObjectsOnTree( remove ).values()]
+        for i in rem:
             if i in pv:
                 pv.remove( i )
         return pv
@@ -152,7 +166,7 @@ class Mish:
         moose.reinit()
         lastt = 0.0
         for stim in self.stimVec:
-            #print( "STIM = ", stim.mol, "   ", stim.conc, " ", stim.time )
+            #print( "STIM = ", stim.mooseMol, "   ", stim.conc, " ", stim.time )
             objName = self.pathMap.get( stim.mooseMol )
             if objName:
                 if stim.time > lastt:
@@ -162,6 +176,7 @@ class Mish:
                     lastt = stim.time
                 obj = moose.element( objName )
                 obj.concInit = stim.conc #assign conc even if no sim advance
+                #print( "STIM: {} = {}".format( obj.path, obj.concInit ) )
             else:
                 print( "Warning: Stimulus molecule '{}' not found in MOOSE".format( stim.mooseMol ) )
         #nt = np.transpose( np.array( self.model.plotvec ) )
@@ -461,9 +476,8 @@ def getHillTauName( name ):
     else:
         return sp[1]
 
-def runMishOptimization( mish, args ):
+def runMishOptimization( mish, args, t1, t0 ):
     initParams = np.ones( len( mish.params ) )
-    t0 = time.time()
     initRet = mish.doRun( initParams )
     if args.checkInit:
         print( "Initial MOOSE run took {:.3f} seconds".format( time.time() - t0 ) )
@@ -522,7 +536,7 @@ def main():
     print( "Completed reference run of '{}' in {:.5f}s".format( args.HillTauModel, t1 -t0 ) )
 
     mish = Mish( args.chemModel, referenceOutputs, args, stimVec )
-    initRet, finalRet = runMishOptimization( mish, args )
+    initRet, finalRet = runMishOptimization( mish, args, t1, t0 )
 
     if args.plot:
         for name, ref in referenceOutputs.items():
