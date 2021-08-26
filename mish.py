@@ -73,7 +73,7 @@ class Mish:
         self.stimVec = stimVec
         self.numIter = 0
         self.simt = 0
-        self.molMap = { getMooseName(i):getHillTauName(i) for i in args.monitor }
+        self.molMap = { getHillTauName(i):getMooseName(i) for i in args.monitor }
         self.pathMap = {} # Looks up full mol path from mol name.
 
         # Load the moose model
@@ -193,9 +193,9 @@ class Mish:
 
     def doScore( self, outDict ):
         sq = 0.0
-        for name, ref in self.reference.items():
+        for htname, ref in self.reference.items():
             yrange = max( ref )
-            expt = outDict[self.molMap[name]]
+            expt = outDict[self.molMap[htname]]
             dl = len( expt) - len(ref )
             if abs( dl ) > 2:
                 raise ValueError( "Output vec lengths differ too much, {} vs {}".format( len( expt ), len(ref ) ) )
@@ -603,15 +603,15 @@ def main():
     initRet, finalRet = runMishOptimization( mish, args, t1, t0 )
 
     if args.plot:
-        for name, ref in referenceOutputs.items():
-            hname = mish.molMap[ name ]
+        for htname, ref in referenceOutputs.items():
+            mooseName = mish.molMap[ htname ]
             fig = plt.figure( figsize = (6,6), facecolor='white' )
-            ax = plotBoilerplate( xlabel = "Time (s)", title = hname )
+            ax = plotBoilerplate( xlabel = "Time (s)", title = mooseName )
             x = np.array( range( len( ref ) ) ) * plotDt
             ax.plot( x , 1000.0 * ref, label = "HillTau" )
-            x = np.array( range( len( initRet[hname] ) ) ) * plotDt
-            ax.plot( x, 1000.0 * initRet[hname], label = "MOOSE orig" )
-            ax.plot( x, 1000.0 * np.array( finalRet[hname] ), label = "MOOSE opt" )
+            x = np.array( range( len( initRet[mooseName] ) ) ) * plotDt
+            ax.plot( x, 1000.0 * initRet[mooseName], label = "MOOSE orig" )
+            ax.plot( x, 1000.0 * np.array( finalRet[mooseName] ), label = "MOOSE opt" )
             ax.legend()
         plt.show()
 
