@@ -30,6 +30,8 @@
 **********************************************************************/
 '''
 from __future__ import print_function
+import datetime
+import getpass
 import sys
 import os
 from scipy.optimize import minimize
@@ -80,7 +82,6 @@ class Mish:
             self.modelId = moose.loadModel( chem, 'model', 'gsl' )
         elif file_extension == ".xml":
             self.modelId = moose.readSBML( chem, 'model', 'gsl' )
-        moose.le( "/model/kinetics" )
 
         for i in args.monitor:
             mooseName = getMooseName( i )
@@ -505,6 +506,64 @@ def runMishOptimization( mish, args, t1, t0 ):
 
     return initRet, finalRet
 
+def generateStimEntries( stimVec ):
+    ret = []
+    assert( len( stimVec ) > 0 )
+    # Split stimVec into subsets, one for each molecule.
+    stimMolDict = {}
+    for i in stimVec:
+        if i.mooseMol in stimMolDict:
+            stimMolDict[i.mooseMol].append(i)
+        else:
+            stimMolDict[i.mooseMol] = [i]
+
+    for name, val in stimMolDict.items():
+        ret.append( {"timeUnits": "sec", "quantityUnits": "mM", "entity": name, "field": "conc", "data": generateStimData(val) } )
+    return ret
+
+def generateStimData( stimVec ):
+    ret = []
+    for i in stimVec:
+        ret.append( [i.time, i.conc] )
+    return ret
+
+def generateReadoutData( plotDt, refOutput, stimVec ):
+    temp = []
+    ret = []
+    for i in stimVec:
+        temp.append( i.time )
+    st = np.concatenate( ( temp, np.arange( 0.0, plotDt * len(refOutput), plotDt * 100 ) ) )
+    times = np.unique( np.round(st, 2) )
+    indices = np.round( times/plotDt ).astype( int )
+    if indices[-1] >= len( refOutput ):
+        times = times[:-1]
+        indices = indices[:-1]
+    ret = [ [t,  refOutput[i], 0] for t, i in zip( times, indices )]
+    return ret
+
+def generateExperiment( args, stimVec, refOutput ):
+    transcriber = getpass.getuser()
+    mooseMolName = getMooseName( args.monitor[0] )
+    htMolName = getHillTauName( args.monitor[0] )
+    assert( htMolName in refOutput )
+    jsonDict = { 
+            "FileType": "FindSim",
+            "Version": "1.0",
+            "Metadata": 
+            {"transcriber": transcriber, "organization": "OpenSource", 
+                "source": {"sourceType": "other", "doi": "dummy", "year":datetime.datetime.now().year}
+            },
+            "Experiment": { "design": "TimeSeries", "species":"", "cellType": "", "notes": "Generated from mish.py" },
+            "Stimuli": generateStimEntries( stimVec ),
+            "Readouts": { "timeUnits": "sec", "quantityUnits":"uM",
+                "entities": mooseMolName,
+                "field": "conc",
+                "data": generateReadoutData( plotDt, refOutput[htMolName], stimVec )
+                }
+            }
+    with open( args.generateExperiment, "w" ) as fd:
+        json.dump( jsonDict, fd, indent = 4 )
+            
 
 def main():
     global plotDt
@@ -523,6 +582,7 @@ def main():
     parser.add_argument( '-p', '--plot', action='store_true', help='Flag: when set, it plots the chem output, the original HillTau output, and the optimized HillTau output')
     parser.add_argument( "-t", "--tolerance", type = float, help = "Optional: tolerance for convergence of optimization.", default = 1.0e-6 )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized SBML model. If not set, no file is saved.', default = "" )
+    parser.add_argument( '-g', '--generateExperiment', type = str, help='Optional: Generate a FindSim experiment file with the specified stimulus protocol and simulated HillTau output as the target values.', default = "", metavar = "experiment_file_name" )
     args = parser.parse_args()
 
     if len( args.builtin ) > 0:
@@ -534,6 +594,10 @@ def main():
     referenceOutputs = runHillTau( args.HillTauModel, stimVec, htMonitor )
     t1 = time.time()
     print( "Completed reference run of '{}' in {:.5f}s".format( args.HillTauModel, t1 -t0 ) )
+
+    if args.generateExperiment:
+        generateExperiment( args, stimVec, referenceOutputs )
+        quit()
 
     mish = Mish( args.chemModel, referenceOutputs, args, stimVec )
     initRet, finalRet = runMishOptimization( mish, args, t1, t0 )
