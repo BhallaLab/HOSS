@@ -120,6 +120,10 @@ class Mish:
             el = moose.wildcardFind( "/model/kinetics/" + j + ",/model/kinetics/##/" + j )
             if len( el ) > 0:
                 ret[ i ] = el[0].path + '.' + k
+            if len( el ) > 1:
+                print( "Warning: Multiple matches to object.param '{}'. Using first.\nSuggest you use unambiguous path names. Matches are:".format( i ))
+                for idx, obj in enumerate( el ):
+                    print( idx, "   ", obj.path )
         return ret
 
 
@@ -129,8 +133,11 @@ class Mish:
         else:
             pv = []
             el = moose.wildcardFind( "/model/kinetics/##[ISA=PoolBase]" )
+            print( "NUM EL = ", len( el ) )
             for i in el:
-                pv.append( i.path + ".concInit" )
+                if not i.parent.isA( "EnzBase" ):
+                    pv.append( i.path + ".concInit" )
+            print( "NUM EL after removing cplx = ", len( pv ) )
             el = moose.wildcardFind( "/model/kinetics/##[ISA=Reac]" )
             for i in el:
                 pv.append( i.path + ".tau" )
@@ -140,6 +147,8 @@ class Mish:
                 pv.append( i.path + ".kcat" )
                 pv.append( i.path + ".Km" )
         rem = [ v for v in self.findMooseObjectsOnTree( remove ).values()]
+        print( "Initial # of params = ", len(pv), ", number to remove = ", len(rem) )
+
         for i in rem:
             if i in pv:
                 pv.remove( i )
