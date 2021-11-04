@@ -118,6 +118,7 @@ defaultBounds = {
         "conc":Bounds(1e-9, 100.0), 
         "concInit":Bounds(1e-9, 100.0),
         "KA": Bounds(1e-9, 100.0), 
+        "Kd": Bounds(1e-9, 100.0), 
         "tau": Bounds( 0.1, 2000.0), 
         "tau2": Bounds( 0.2, 4000.0), 
         "Kmod": Bounds( 1e-9, 100.0), 
