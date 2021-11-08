@@ -118,7 +118,9 @@ defaultBounds = {
         "conc":Bounds(1e-9, 100.0), 
         "concInit":Bounds(1e-9, 100.0),
         "KA": Bounds(1e-9, 100.0), 
-        "Kd": Bounds(1e-9, 100.0), 
+        "Kd": Bounds(1e-6, 100.0),  # Nanomolar.
+        "Km": Bounds(1e-6, 1.0),  # nanomolar to millimolar affinity
+        "kcat": Bounds(1e-3, 100.0), 
         "tau": Bounds( 0.1, 2000.0), 
         "tau2": Bounds( 0.2, 4000.0), 
         "Kmod": Bounds( 1e-9, 100.0), 
@@ -430,6 +432,10 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
                 bounds.append( Bounds( ip * 0.01, ip * 100.0 ) )
             #print( i, bounds[-1].lo, bounds[-1].hi )
             #bounds.append( defaultBounds.get( spl[1] ) )
+    #print( "PARAMS = ", params )
+    #print( "INIT  = ", [i for i in initParams ])
+    #print( "BOUNDS = ", [ (b.lo, b.hi) for b in bounds] )
+    #print( "------------------------------------------------" )
     ev = EvalFunc( params, bounds, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker )
     # Generate the score for each expt for the initial condition
     ret = ev.doEval( [] )
