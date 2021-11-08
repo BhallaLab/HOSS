@@ -1,0 +1,26 @@
+{
+	"FileType": "HOSS",
+	"Version": "1.0",
+	"developer": "Upi Bhalla",
+	"model": "reac_unfit.g",
+	"map":"reac_map.json",
+	"exptDir": ".",
+	"scoreFunc": "((expt-sim)*(expt-sim) / (datarange*datarange+1e-9))**0.5",
+	"tolerance": 0.0001,
+	"Comment": "HOSS1 is individual pathway opts.",
+	"HOSS": [
+		{
+			"name": "IndividualPathways", 
+			"hierarchyLevel": 1,
+			"reac": {
+				"comment": "Each block can be optimized independently in ||",
+				"expt": { 
+					"reac_expt.json": {"weight": 100}
+					},
+				"params": ["reac.Kf", "reac.Kb"],
+				"resultFile": "reac_opt.txt",
+				"optModelFile": "reac_opt.g"
+				}
+		}
+	]
+}
