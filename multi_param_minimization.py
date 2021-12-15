@@ -196,7 +196,7 @@ class EvalFunc:
         paramList = []
         if len( x ) > 0:
             if len(x) != len( self.params ):
-                print( "pppppppppppp", len(x), "    ", len( self.params ), "    ", self.params )
+                print( "Warning: parameter vector length differs from # of params", len(x), "    ", len( self.params ), "    ", self.params )
             assert( len(x) == len( self.params) )
 
             for i, j, b in zip( self.params, x, self.paramBounds ):
@@ -208,6 +208,7 @@ class EvalFunc:
                 #paramList.append( field.encode( "ascii") )
                 #y = 0.01 + 99.99 / ( 1 + np.exp( -j ) )
                 paramList.append( b.func(j) )
+                #print( "{} = {:.3f}".format( i, b.func(j) ))
             #print( "{}".format( paramList ) )
 
         if len( self.expts ) == 1:
@@ -242,6 +243,7 @@ class EvalFunc:
             return -1.0
         sumScore = sum([ pow( s, ScorePow )*e[1] for s, e in zip(self.score, self.expts) if s>=0.0])
         sumWts = sum( [ e[1] for s, e in zip(self.score, self.expts) if s>=0.0 ] )
+        #print("RET = {:.3f}".format( pow( sumScore/sumWts, 1.0/ScorePow )))
         return pow( sumScore/sumWts, 1.0/ScorePow )
 
 def optCallback( x ):
@@ -413,6 +415,10 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
         sp.extend( p.split('.') )
         sp.append( 1.0 )
     initParams = findSim.innerMain( expts[0][0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True, ignoreMissingObj = True, silent = True )
+    '''
+    for p, v in zip( paramArgs, initParams ):
+        print( p, v )
+    '''
     #print( "INIT PARAMS = ", initParams, "\n expt= ", expts[0][0] )
 
     # By default, set the bounds in the range of 0.01 to 100x original.
@@ -430,7 +436,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
                 bounds.append( Bounds( MINIMUM_CONC, MIDDLE_CONC ) )
             else:
                 bounds.append( Bounds( ip * 0.01, ip * 100.0 ) )
-            #print( i, bounds[-1].lo, bounds[-1].hi )
+        #print( "{} = {:.4g}, bounds = {:.4g}, {:.4g}".format( i, ip, bounds[-1].lo, bounds[-1].hi ) )
             #bounds.append( defaultBounds.get( spl[1] ) )
     #print( "PARAMS = ", params )
     #print( "INIT  = ", [i for i in initParams ])
@@ -443,7 +449,13 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
         eret = [ { "expt":e[0], "weight":1, "score": ret, "initScore": 0} for e in ev.expts ]
         return ( DummyResult(len(params) ), eret, time.time() - t0 )
     initScore = ev.score
+    #print( "INIT SCORE = ", initScore )
     initVec = [ b.invFunc(p) for b, p in zip( bounds, initParams ) ]
+    #for b, p in zip( bounds, initParams ):
+    #print( ["{:.3f} {:.3f}".format( p, b.invFunc(p) ) for b, p in zip( bounds, initParams)] )
+    #print( "INITVec = ", initVec )
+    #print( "INITParms = ", initParams )
+    
 
     # Do the minimization
     if algorithm in ['COBYLA']:
