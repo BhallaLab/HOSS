@@ -415,6 +415,8 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
         sp.extend( p.split('.') )
         sp.append( 1.0 )
     initParams = findSim.innerMain( expts[0][0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True, ignoreMissingObj = True, silent = True )
+    if initParams[0] == -1:
+        quit()
     '''
     for p, v in zip( paramArgs, initParams ):
         print( p, v )

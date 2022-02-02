@@ -565,7 +565,7 @@ def generateExperiment( args, stimVec, refOutput ):
             "Experiment": { "design": "TimeSeries", "species":"", "cellType": "", "notes": "Generated from mish.py" },
             "Stimuli": generateStimEntries( stimVec ),
             "Readouts": { "timeUnits": "sec", "quantityUnits":"uM",
-                "entities": mooseMolName,
+                "entities": [mooseMolName],
                 "field": "conc",
                 "data": generateReadoutData( plotDt, refOutput[htMolName], stimVec )
                 }
