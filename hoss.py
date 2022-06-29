@@ -91,6 +91,7 @@ def main():
     parser.add_argument( '-b', '--blocks', nargs='*', default=[],  help='Blocks to execute within the JSON file. Defaults to empty, in which case all of them are executed. Each block is the string identifier for the block in the JSON file.' )
     parser.add_argument( '-m', '--model', type = str, help='Optional: Composite model definition file. First searched in directory "location", then in current directory.' )
     parser.add_argument( '-map', '--map', type = str, help='Model entity mapping file. This is a JSON file.' )
+    parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files.', default = "./Expts" )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-p', '--parallel', type = str, help='Optional: Define parallelization model. Options: serial, MPI, threads. Defaults to serial. MPI not yet implemented', default = "serial" )
     parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
@@ -110,11 +111,10 @@ def main():
     #basekeys = ["model", "map", "exptDir", "scoreFunc", "tolerance"]
     basekeys = vars( args ).keys()
     baseargs = vars( args )
-    baseargs["exptDir"] = "./"
-    #baseargs = {"exptDir": "./", "tolerance": 1e-4}
     for key, val in config.items():
         if key in basekeys:
-            baseargs[key] = val
+            if baseargs[key] == "" or baseargs[key] == None:
+                baseargs[key] = val
 
     optBlocks = {}
     for hossLevel in blocks:

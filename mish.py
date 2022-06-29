@@ -93,6 +93,9 @@ class Mish:
             el = moose.wildcardFind( "/model/kinetics/" + i.mooseMol + ",/model/kinetics/##/" + i.mooseMol )
             if len( el ) == 0:
                 raise( ValueError( "Stim molecule '{}' not found".format(i.mooseMol )) )
+            # Check that any stimulated molecules are buffered
+            if not el[0].isBuffered:
+                print( "Warning: stimulus molecule '", i.mooseMol, "' is not buffered. Probably an error. Suggest to run with buffered version." )
             self.pathMap[i.mooseMol] = el[0].path
 
         tabs = moose.Neutral( "/model/tabs" )
@@ -187,7 +190,7 @@ class Mish:
                     self.simt += time.time() - t0
                     lastt = stim.time
                 obj = moose.element( objName )
-                obj.concInit = stim.conc #assign conc even if no sim advance
+                obj.conc = obj.concInit = stim.conc #assign conc even if no sim advance
                 #print( "STIM: {} = {}".format( obj.path, obj.concInit ) )
             else:
                 print( "Warning: Stimulus molecule '{}' not found in MOOSE".format( stim.mooseMol ) )
