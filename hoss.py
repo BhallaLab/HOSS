@@ -56,30 +56,27 @@ def runJson( key, val, baseargs ):
     return "foo"
 
 
-def processResults( retvec, args, baseargs, t0 ):
-    fp = ""
-    dumpData = False
-    if len( args.resultfile ) > 0:
-        fp = open( args.resultfile, "w" )
-        dumpData = True
-
-    print( "\n----------- Completed entire HOSS run in {:.3f} sec ---------- ".format(time.time() - t0 ) ) 
+def processIntermediateResults( retvec, baseargs, t0 ):
+    fp = open( baseargs["resultfile"], "w" )
+    optfile = baseargs["optfile"]
+    levelIdx = int(optfile[-6:-5]) # Assume we have only levels 0 to 9.
     totScore = 0.0
     for (results, eret, optTime, paramArgs) in retvec:
-        multi_param_minimization.analyzeResults( fp, dumpData, results, paramArgs, eret, optTime )
+        multi_param_minimization.analyzeResults( fp, True, results, paramArgs, eret, optTime )
         totScore += results.fun
-    print( "\n----------- Mean Score = {:.3f} -- Total Time: {:.3f} s -------- ".format( totScore / len( retvec ), time.time() - t0 ) ) 
+    print( "\n-Level {} -- Mean Score = {:.3f} -- Total Time: {:.3f} s -------- ".format( levelIdx, totScore / len( retvec ), t0 ) )
 
-    if len( args.optfile ) > 2: # at least foo.g
-        fnames = { "model": baseargs["model"], "optfile": args.optfile, "map": baseargs["map"], "resultfile": args.resultfile }
-        pargs = []
-        rargs = []
-        # Catenate all the changed params and values.
-        for (results, eret, optTime, paramArgs) in retvec:
-            rargs.extend( results.x )
-            pargs.extend( paramArgs )
-        multi_param_minimization.saveTweakedModelFile( args, pargs, rargs, fnames )
+    fnames = { "model": baseargs["model"], "optfile": optfile, "map": baseargs["map"], "resultfile": baseargs["resultfile"] }
+    pargs = []
+    rargs = []
+    # Catenate all the changed params and values.
+    for (results, eret, optTime, paramArgs) in retvec:
+        rargs.extend( results.x )
+        pargs.extend( paramArgs )
+    multi_param_minimization.saveTweakedModelFile( {}, pargs, rargs, fnames )
 
+def processFinalResults( results, baseargs, t0 ):
+    print( "\n-Completed mulitlevel optimzation -- Total Time: {:.3f} s -------- ".format( t0 ) )
 
 def main():
     t0 = time.time()
@@ -113,39 +110,73 @@ def main():
     baseargs = vars( args )
     for key, val in config.items():
         if key in basekeys:
+            # Use config file setting if not passed in on command line.
             if baseargs[key] == "" or baseargs[key] == None:
                 baseargs[key] = val
 
-    optBlocks = {}
-    for hossLevel in blocks:
-        if hossLevel["hierarchyLevel"] == 1:
-            for key, val in hossLevel.items():
-                if key == "name" or key == "hierarchyLevel":
-                    continue
-                if args.blocks == [] or key in args.blocks:
-                    optBlocks[key] = val
-    if len( optBlocks ) == 0:
-        print( "Error: No matching optimization blocks found" )
-        quit()
+    # Build up optimization blocks. Within a block we assume that the
+    # individual optimizations do not interact and hence can run in 
+    # parallel. Once a block is done its values are consolidated and used
+    # for the next block.
+    assert( 'model' in baseargs )
+    assert( 'resultfile' in baseargs )
+    origModel = baseargs['model'] # Use for loading model
+    optModel = baseargs['optfile'] # Use for final model save
+    optResults = baseargs['resultfile'] # Use for final results
+    results = []
+    for hossLevel in blocks: # Assume blocks are in order of execution.
+        optBlock = {}
+        hl = hossLevel["hierarchyLevel"]
+        # Specify intermediate model and result files
+        baseargs['optfile'] = "./_optModel{}.json".format( hl )
+        baseargs['resultfile'] = "./_optResults{}.txt".format( hl )
+        for key, val in hossLevel.items():
+            if key == "name" or key == "hierarchyLevel":
+                continue
+            # Either run all items or run named items in block.
+            if args.blocks == [] or key in args.blocks:
+                optBlock[ key] = val
 
-    if args.parallel == "serial":
-        score = []
-        for key, val in optBlocks.items():
-            print( "\n===================== Serial run for block: ", key , "=========================" )
-            score.append( multi_param_minimization.runJson( key, val, baseargs ) )
-        #score = [multi_param_minimization.runJson( key, val, baseargs ) for key, val in  optBlocks.items() ]
-    elif args.parallel == "MPI":
-        print( "MPI not yet running" )
-        score = [0.0] * len( optBlocks )
-    elif args.parallel == "threads":
-        print ("RUNNNING THREADS" )
-        pool = ThreadPool( processes = len( optBlocks ) )
-        ret = [pool.apply_async( multi_param_minimization.runJson, args=( key, val, baseargs ) ) for key, val in  optBlocks.items() ]
-        #ret = [pool.apply_async( runJson, args=( key, val, baseargs ) ) for key, val in  optBlocks.items() ]
-        # return from runJson is (results, ev, initScore), paramArgs
-        score = [ i.get() for i in ret ]
+        # Now we have a block to optimize, use suitable method to run it.
+        # We can run items in a block in any order, but the whole block
+        # must be wrapped up before we go to the next level of heirarchy.
+        t1 = time.time()
+        if args.parallel == "serial":
+            score = runOptSerial( optBlock, baseargs )
+        elif args.parallel == "threads":
+            score = runOptThreads( optBlock, baseargs )
+        elif args.parallel == "MPI":
+            score = runOptMPI( optBlock, baseargs )
+        t2 = time.time()
+        # This saves the scores and the intermediate opt file, to use for
+        # next level of optimization.
+        processIntermediateResults( score, baseargs, t2 - t1 )
+        t1 = t2
+        baseargs["model"] = baseargs["optfile"] # Apply heirarchy to opt
+        results.append( score )
+    processFinalResults( results, baseargs, time.time() - t0  )
 
-    processResults( score, args, baseargs, t0 )    
+def runOptSerial( optBlock, baseargs ):
+    score = []
+    for name, pathway in optBlock.items():
+        score.append( multi_param_minimization.runJson( name, pathway, baseargs ) )
+        print( "Run OptSerial for {} gave {}".format(name, score[-1][0].fun) )
+
+    return score
+
+def runOptThreads( optModel, itemName, item, baseargs ):
+    score = []
+    pool = ThreadPool( processes = len( optBlocks ) )
+    ret = [pool.apply_async( multi_param_minimization.runJson, args=( key, val, baseargs ) ) for key, val in  optBlocks.items() ]
+    score.append( multi_param_minimization.runJson( itemName, item, baseargs ) )
+
+    return score, optModel
+
+def runOptMPI( optModel, itemName, item, baseargs ):
+    score = []
+    score.append( multi_param_minimization.runJson( itemName, item, baseargs ) )
+
+    return score, optModel
         
 # Run the 'main' if this script is executed standalone.
 if __name__ == '__main__':

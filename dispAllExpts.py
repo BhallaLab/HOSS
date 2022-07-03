@@ -52,11 +52,12 @@ def logResult(result):
 
 def main():
     parser = argparse.ArgumentParser( description = 
-            'This script displays simulation results compared with experiments for all the experiments defined in the optimization configuration file (a json file). It runs in serial.' )
+            'This script displays simulation results compared with experiments for all the experiments defined in the optimization configuration file (a json file). It runs in serial.')
     parser.add_argument( 'config', type = str, help='Required: JSON configuration file, typically same file as used for doing the optimization.')
     parser.add_argument( '-b', '--blocks', nargs='*', default=[],  help='Blocks to display within the JSON file. Defaults to empty, in which case all of them are display. Each block is the string identifier for the block in the JSON file.' )
     parser.add_argument( '-m', '--model', type = str, help='Optional: File name for alternative model to run.', default = "" )
     parser.add_argument( '-map', '--map', type = str, help='Optional: File name for alternative model mapfile.', default = "" )
+    parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation.', default = "" ) 
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     args = parser.parse_args()
 
@@ -74,6 +75,8 @@ def main():
     if args.map != "":
         mapfile = args.map
     scoreFunc = config["scoreFunc"]
+    if args.scoreFunc != "":
+        scoreFunc = args.scoreFunc
     b = args.blocks
     edict = {}
     blocks = config["HOSS"]
