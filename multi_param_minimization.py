@@ -483,7 +483,7 @@ def saveTweakedModelFile( args, params, x, fnames ):
     # dumps the modified file.
     findSim.saveTweakedModel( fnames["model"], fnames["optfile"], fnames["map"], changes)
 
-def analyzeResults(fp, dumpData, results, params, eret, optTime):
+def analyzeResults(fp, dumpData, results, params, eret, optTime, verbose=True):
     assert( len(results.x) == len( params ) )
     assert( len(results.x) == len( results.initParams ) )
     sys.stdout.flush()
@@ -511,7 +511,8 @@ def analyzeResults(fp, dumpData, results, params, eret, optTime):
             numSum += e["weight"]
     out.append( "\nInit score = {:.4f}, final = {:.4f}".format(pow(initSum/numSum, 1.0/ScorePow), results.fun ) )
     for i in out:
-        print( i )
+        if verbose:
+            print( i )
         if dumpData:
             fp.write( i + '\n' )
     #fp.close()    

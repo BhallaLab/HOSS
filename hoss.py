@@ -47,6 +47,7 @@ import time
 from multiprocessing.pool import ThreadPool
 import multi_param_minimization
 
+ScorePow = 2.0
 
 def runJson( key, val, baseargs ):
     ''' a dummy function for testing '''
@@ -56,15 +57,41 @@ def runJson( key, val, baseargs ):
     return "foo"
 
 
+def combineScores( eret ):
+    initSum = 0.0
+    finalSum = 0.0
+    numSum = 0.0
+    for ee in eret:
+        eis = ee["initScore"]
+        fis = ee["score"]
+        #print( "eis = ", eis, "     fis = ", fis, "   weight = ", ee["weight"] )
+        if eis >= 0:
+            initSum += pow( eis, ScorePow ) * ee["weight"]
+            finalSum += pow( fis, ScorePow ) * ee["weight"]
+            numSum += ee["weight"]
+    if numSum == 0:
+        return 0,0, 0.0
+    else:
+        #print( "----> IS = ", pow( initSum / numSum, 1.0/ScorePow ), "        FS = ", pow( finalSum / numSum, 1.0/ScorePow ) )
+        return pow( initSum / numSum, 1.0/ScorePow ), pow( finalSum / numSum, 1.0/ScorePow )
+
+
 def processIntermediateResults( retvec, baseargs, t0 ):
     fp = open( baseargs["resultfile"], "w" )
     optfile = baseargs["optfile"]
     levelIdx = int(optfile[-6:-5]) # Assume we have only levels 0 to 9.
     totScore = 0.0
+    totInitScore = 0.0
+    totAltScore = 0.0
     for (results, eret, optTime, paramArgs) in retvec:
-        multi_param_minimization.analyzeResults( fp, True, results, paramArgs, eret, optTime )
+        multi_param_minimization.analyzeResults( fp, True, results, paramArgs, eret, optTime, False ) # Last arg is 'verbose'
         totScore += results.fun
-    print( "\n-Level {} -- Mean Score = {:.3f} -- Total Time: {:.3f} s -------- ".format( levelIdx, totScore / len( retvec ), t0 ) )
+        initScore, altScore = combineScores( eret )
+        totAltScore += altScore
+        totInitScore += initScore
+    if ( totScore - totAltScore > 1e-6 ):
+        print( "Warning: Score mismatch in processIntermediateResults: ", totScore, totAltScore )
+    print( "Level {} ------- Init Score: {:.3f}   FinalScore {:.3f}       Time: {:.3f} s\n".format( levelIdx, totInitScore / len( retvec ), totAltScore / len( retvec ), t0 ) )
 
     fnames = { "model": baseargs["model"], "optfile": optfile, "map": baseargs["map"], "resultfile": baseargs["resultfile"] }
     pargs = []
@@ -74,9 +101,23 @@ def processIntermediateResults( retvec, baseargs, t0 ):
         rargs.extend( results.x )
         pargs.extend( paramArgs )
     multi_param_minimization.saveTweakedModelFile( {}, pargs, rargs, fnames )
+    return [ totInitScore, totAltScore, len( retvec ) ]
 
-def processFinalResults( results, baseargs, t0 ):
-    print( "\n-Completed mulitlevel optimzation -- Total Time: {:.3f} s -------- ".format( t0 ) )
+def processFinalResults( results, baseargs, intermed, t0 ):
+
+    totScore = 0.0
+    numScore = 0.0
+    for retVec in results:
+        for rr in retVec:
+            totScore += rr[0].fun
+        numScore += len( retVec )
+    totInitScore = sum( [ ii[0] for ii in intermed ] )
+    totAltScore = sum ( [ ii[1] for ii in intermed ] )
+    numRet = sum ( [ ii[2] for ii in intermed ] )
+    #print( "\nMultilevel optimization complete in {:.3f} s--- Mean Score = {:.3f} ".format( t0, totScore/numScore ) )
+    print( "\nMultilevel optimization:  Mean Init Score = {:.3f}, Final = {:.3f}, Time={:.3f}s".format( totInitScore/numRet, totAltScore/numRet, t0 ) )
+
+######################################
 
 def main():
     t0 = time.time()
@@ -124,6 +165,7 @@ def main():
     optModel = baseargs['optfile'] # Use for final model save
     optResults = baseargs['resultfile'] # Use for final results
     results = []
+    intermed = []
     for hossLevel in blocks: # Assume blocks are in order of execution.
         optBlock = {}
         hl = hossLevel["hierarchyLevel"]
@@ -150,17 +192,20 @@ def main():
         t2 = time.time()
         # This saves the scores and the intermediate opt file, to use for
         # next level of optimization.
-        processIntermediateResults( score, baseargs, t2 - t1 )
+        ret = processIntermediateResults( score, baseargs, t2 - t1 )
         t1 = t2
+        intermed.append( ret )
         baseargs["model"] = baseargs["optfile"] # Apply heirarchy to opt
         results.append( score )
-    processFinalResults( results, baseargs, time.time() - t0  )
+    processFinalResults( results, baseargs, intermed, time.time() - t0  )
 
 def runOptSerial( optBlock, baseargs ):
     score = []
     for name, pathway in optBlock.items():
         score.append( multi_param_minimization.runJson( name, pathway, baseargs ) )
-        print( "Run OptSerial for {} gave {}".format(name, score[-1][0].fun) )
+        initScore, optScore = combineScores (score[-1][1] )
+        print( "OptSerial {:20s} Init={:.3f}     Opt={:.3f}     Time={:.3f}s".format(name, initScore, optScore, score[-1][2] ) )
+        # optScore == score[-1][0].fun
 
     return score
 
