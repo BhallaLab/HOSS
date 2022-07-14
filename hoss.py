@@ -76,10 +76,10 @@ def combineScores( eret ):
         return pow( initSum / numSum, 1.0/ScorePow ), pow( finalSum / numSum, 1.0/ScorePow )
 
 
-def processIntermediateResults( retvec, baseargs, t0 ):
+def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
     fp = open( baseargs["resultfile"], "w" )
     optfile = baseargs["optfile"]
-    levelIdx = int(optfile[-6:-5]) # Assume we have only levels 0 to 9.
+    #levelIdx = int(optfile[-6:-5]) # Assume we have only levels 0 to 9.
     totScore = 0.0
     totInitScore = 0.0
     totAltScore = 0.0
@@ -176,9 +176,12 @@ def main():
             if key == "name" or key == "hierarchyLevel":
                 continue
             # Either run all items or run named items in block.
+            #print( "Args.blocks = ", args.blocks, "     Key = ", key )
             if args.blocks == [] or key in args.blocks:
                 optBlock[ key] = val
 
+        if len( optBlock ) == 0:
+            continue        # Nothing to see here, move along to next level
         # Now we have a block to optimize, use suitable method to run it.
         # We can run items in a block in any order, but the whole block
         # must be wrapped up before we go to the next level of heirarchy.
@@ -192,7 +195,7 @@ def main():
         t2 = time.time()
         # This saves the scores and the intermediate opt file, to use for
         # next level of optimization.
-        ret = processIntermediateResults( score, baseargs, t2 - t1 )
+        ret = processIntermediateResults( score, baseargs, hl, t2 - t1 )
         t1 = t2
         intermed.append( ret )
         baseargs["model"] = baseargs["optfile"] # Apply heirarchy to opt
