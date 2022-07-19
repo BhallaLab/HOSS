@@ -164,7 +164,7 @@ def dumbTicker( result ):
     #sys.stdout.flush()
 
 class EvalFunc:
-    def __init__( self, params, bounds, expts, pool, modelFile, mapFile, verbose, showTicker = True ):
+    def __init__( self, params, bounds, expts, pool, modelFile, mapFile, verbose, showTicker = True, solver = "gsl" ):
         # params specified as list of strings of form object.field 
         self.params = params
         # paramBounds specified as list of Bounds objects
@@ -175,6 +175,7 @@ class EvalFunc:
         self.mapFile = mapFile
         self.verbose = verbose # bool
         self.showTicker = showTicker
+        self.solver = solver
         self.numCalls = 0
         self.numIter = 0
         self.score = []
@@ -213,13 +214,13 @@ class EvalFunc:
 
         if len( self.expts ) == 1:
             k = self.expts[0]
-            ret.append( findSim.innerMain( k[0], scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose ))
+            ret.append( findSim.innerMain( k[0], scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose, solver = self.solver ))
             #print( "RET ===========", ret )
             self.ret = { e[0]:i for i, e in zip( ret, sorted(self.expts) ) }
         else:
             for k in sorted(self.expts):
                 #print ("ssssssssssssssscoreFunc = ", k[2] )
-                ret.append( self.pool.apply_async( findSim.innerMain, (k[0],), dict(scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose ), callback = dumbTicker ) )
+                ret.append( self.pool.apply_async( findSim.innerMain, (k[0],), dict(scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose, solver = self.solver ), callback = dumbTicker ) )
             #print( "RET ===========", ret )
             self.ret = { e[0]:i.get() for i, e in zip( ret, sorted(self.expts) ) }
         #print( "  = {} {}".format( len( ret ), ret ) )
@@ -273,7 +274,7 @@ def runOptFromCommandLine( args ):
     #fnames = [ (location + i) for i in os.listdir( args.location ) if i.endswith( ".json" )]
     fnames, weights = enumerateFindSimFiles( args.location )
     expts = zip( fnames, weights, [ defaultScoreFunc ] * len( fnames ) )
-    ret = innerMain( args.parameters, expts, modelFile, args.map, args.verbose, args.tolerance, showTicker = args.show_ticker, algorithm = args.algorithm )
+    ret = innerMain( args.parameters, expts, modelFile, args.map, args.verbose, args.tolerance, showTicker = args.show_ticker, algorithm = args.algorithm, solver = args.solver )
     clfnames = { key: args[key] for key in ["model", "map", "resultfile", "optfile" ] }
     #return ret + ( args["model"], args["map"] )
     return ret + (clfnames,)
@@ -332,10 +333,6 @@ def runJson( optName, optDict, args, isVerbose = False ):
     #print( "RJRJRJRJRJ..........", optName, "\n", "\n", args )
     # The optDict is the individual pathway opt spec from the HOSS Json file
     paramArgs = [ i for i in optDict["params"] ]
-    '''
-    eret = [ { "expt":e, "weight":1, "score": 1.0, "initScore": 0} for e in optDict["expt"] ]
-    return ( DummyResult( len( paramArgs ) ), eret, 1.0 ) + (paramArgs, )
-    '''
     #paramArgs = [ i.encode( "ascii") for i in optDict["params"] ]
     if "scoreFunc" in args:
         df = args["scoreFunc"]
@@ -355,7 +352,7 @@ def runJson( optName, optDict, args, isVerbose = False ):
     else:
         paramBounds = {}
 
-    ret = innerMain( paramArgs, expts, args["model"], args["map"], isVerbose, args["tolerance"], showTicker = args["show_ticker"], algorithm = args["algorithm"], paramBounds = paramBounds )
+    ret = innerMain( paramArgs, expts, args["model"], args["map"], isVerbose, args["tolerance"], showTicker = args["show_ticker"], algorithm = args["algorithm"], paramBounds = paramBounds, solver = args["solver"] )
     return ret + ( paramArgs, )
     
 def extractStatus():
@@ -378,6 +375,7 @@ def main():
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of simulation as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-b', '--optblock', type = str, help='Optional: Block name to optimize in case we have loaded a Hoss.json file with multiple optimization blocks.', default = "" )
+    parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "gsl".', default = "gsl" )
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     parser.add_argument( '-st', '--show_ticker', action="store_true", help="Flag: default False. Prints out ticker as optimization progresses.")
     args = parser.parse_args()
@@ -403,7 +401,7 @@ def main():
         saveTweakedModelFile( args, paramArgs, results.x, fnames )
         dumpData = False
 
-def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "SLSQP", paramBounds = {} ):
+def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "SLSQP", paramBounds = {}, solver = "gsl" ):
     global ev
     t0 = time.time()
     pool = Pool( processes = len( expts ) )
@@ -414,7 +412,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     for p in paramArgs:
         sp.extend( p.split('.') )
         sp.append( 1.0 )
-    initParams = findSim.innerMain( expts[0][0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True, ignoreMissingObj = True, silent = True )
+    initParams = findSim.innerMain( expts[0][0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True, ignoreMissingObj = True, silent = True, solver = solver )
     if initParams[0] == -1:
         quit()
     '''
@@ -444,7 +442,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     #print( "INIT  = ", [i for i in initParams ])
     #print( "BOUNDS = ", [ (b.lo, b.hi) for b in bounds] )
     #print( "------------------------------------------------" )
-    ev = EvalFunc( params, bounds, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker )
+    ev = EvalFunc( params, bounds, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker, solver = solver )
     # Generate the score for each expt for the initial condition
     ret = ev.doEval( [] )
     if ret < -0.1: # Got a negative score, ie, run failed somewhere.
