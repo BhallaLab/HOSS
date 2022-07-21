@@ -402,6 +402,38 @@ def main():
         saveTweakedModelFile( args, paramArgs, results.x, fnames )
         dumpData = False
 
+def findInitialParams( expts, modelFile, mapFile, paramArgs, solver ):
+    mergedInitParams = [-2.0] * len( paramArgs )
+    numBad = 0
+    sp = []
+
+    for p in paramArgs:
+        sp.extend( p.split('.') )
+        sp.append( 1.0 )
+
+    for ee in expts:
+        initParams = findSim.innerMain( ee[0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True, ignoreMissingObj = True, silent = True, solver = solver )
+        if initParams[0] == -1:
+            raise KeyError( "multi_param_minimization.py::findInitialParams: Quit because initParams[0] == -1" )
+
+        for idx, ip in enumerate( initParams ):
+            if not math.isclose( ip, -2.0 ): # initParams has -2 if obj not found. This occurs sometimes when subsetting, so we have to skip this param.
+                mergedInitParams[idx] = ip
+        numBad = sum( [ math.isclose( mip, -2.0 ) for mip in mergedInitParams] )
+        if numBad == 0:
+            break;
+        elif numBad == len( initParams ):
+            raise KeyError( "No valid params in multi_param_minimization::innerMain for expt = " + ee[0] )
+
+    for pa, mip in zip( paramArgs, mergedInitParams ):
+        if math.isclose( mip, -2.0 ):
+            print( "Error: findInitialParams: Parameter not found: ", pa )
+    if numBad > 0:
+        raise KeyError( "Invalid params in multi_param_minimization" )
+
+    return mergedInitParams
+
+
 def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "SLSQP", paramBounds = {}, solver = "gsl" ):
     global ev
     t0 = time.time()
@@ -409,27 +441,13 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
 
     # Some nasty stuff here to get the initial parameters from the model.
     # Ideally there should be a way to combine with the previous eval.
-    sp = []
-    for p in paramArgs:
-        sp.extend( p.split('.') )
-        sp.append( 1.0 )
-    initParams = findSim.innerMain( expts[0][0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True, ignoreMissingObj = True, silent = True, solver = solver )
-    if initParams[0] == -1:
-        print( "multi_param_minimization.py::innerMain: Quit because initParams[0] == -1" )
-        quit()
-    ### Filter out the params that came back -2.
-    '''
-    for p, v in zip( paramArgs, initParams ):
-        print( p, v )
-    '''
+    initParams = findInitialParams( expts, modelFile, mapFile, paramArgs, solver )
     #print( "INIT PARAMS = ", initParams, "\n expt= ", expts[0][0] )
 
     # By default, set the bounds in the range of 0.01 to 100x original.
     params = []
     bounds = []
     for i, ip in zip( paramArgs, initParams ):
-        if math.isclose( ip, -2.0 ): # initParams has -2 if obj not found. This occurs sometimes when subsetting, so we have to skip this param.
-            continue
         spl = i.rsplit( '.',1 ) # i is of the form: object.field
         assert( len(spl) == 2 )
         params.append( i )
@@ -447,9 +465,6 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     #print( "INIT  = ", [i for i in initParams ])
     #print( "BOUNDS = ", [ (b.lo, b.hi) for b in bounds] )
     #print( "------------------------------------------------" )
-    if ( len( params ) == 0 ): # No params, may happen if all objs deleted.
-        raise KeyError( "No valid params in multi_param_minimization::innerMain" )
-
     ev = EvalFunc( params, bounds, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker, solver = solver )
     # Generate the score for each expt for the initial condition
     ret = ev.doEval( [] )
@@ -490,6 +505,10 @@ def saveTweakedModelFile( args, params, x, fnames ):
     findSim.saveTweakedModel( fnames["model"], fnames["optfile"], fnames["map"], changes)
 
 def analyzeResults(fp, dumpData, results, params, eret, optTime, verbose=True):
+    print( "RES.x = ", results.x )
+    print( "RES.initParams = ", results.initParams )
+    print( "Params = ", params )
+
     assert( len(results.x) == len( params ) )
     assert( len(results.x) == len( results.initParams ) )
     sys.stdout.flush()
