@@ -46,6 +46,7 @@ import argparse
 import errno
 import os
 import sys
+import math
 import time
 import json
 import findSim
@@ -300,7 +301,7 @@ def runOptFromJson( args ):
         config = json.load( json_file )
     blocks = config["HOSS"]
     basekeys = ["model", "map", "exptDir", "scoreFunc", "tolerance"]
-    baseargs = {"exptDir": "./", "tolerance": 1e-4, "show_ticker": args.show_ticker, "algorithm": args.algorithm}
+    baseargs = {"exptDir": "./", "tolerance": 1e-4, "show_ticker": args.show_ticker, "algorithm": args.algorithm, "solver": args.solver}
     v = vars( args )
     for key, val in config.items():
         if key in basekeys:
@@ -414,7 +415,9 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
         sp.append( 1.0 )
     initParams = findSim.innerMain( expts[0][0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True, ignoreMissingObj = True, silent = True, solver = solver )
     if initParams[0] == -1:
+        print( "multi_param_minimization.py::innerMain: Quit because initParams[0] == -1" )
         quit()
+    ### Filter out the params that came back -2.
     '''
     for p, v in zip( paramArgs, initParams ):
         print( p, v )
@@ -425,6 +428,8 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     params = []
     bounds = []
     for i, ip in zip( paramArgs, initParams ):
+        if math.isclose( ip, -2.0 ): # initParams has -2 if obj not found. This occurs sometimes when subsetting, so we have to skip this param.
+            continue
         spl = i.rsplit( '.',1 ) # i is of the form: object.field
         assert( len(spl) == 2 )
         params.append( i )
@@ -442,6 +447,9 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     #print( "INIT  = ", [i for i in initParams ])
     #print( "BOUNDS = ", [ (b.lo, b.hi) for b in bounds] )
     #print( "------------------------------------------------" )
+    if ( len( params ) == 0 ): # No params, may happen if all objs deleted.
+        raise KeyError( "No valid params in multi_param_minimization::innerMain" )
+
     ev = EvalFunc( params, bounds, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker, solver = solver )
     # Generate the score for each expt for the initial condition
     ret = ev.doEval( [] )
