@@ -165,13 +165,14 @@ def main():
     origModel = baseargs['model'] # Use for loading model
     optModel = baseargs['optfile'] # Use for final model save
     optResults = baseargs['resultfile'] # Use for final results
+    modelFileSuffix = origModel.split( "." )[-1]
     results = []
     intermed = []
     for hossLevel in blocks: # Assume blocks are in order of execution.
         optBlock = {}
         hl = hossLevel["hierarchyLevel"]
         # Specify intermediate model and result files
-        baseargs['optfile'] = "./_optModel{}.json".format( hl )
+        baseargs['optfile'] = "./_optModel{}.{}".format(hl, modelFileSuffix)
         baseargs['resultfile'] = "./_optResults{}.txt".format( hl )
         for key, val in hossLevel.items():
             if key == "name" or key == "hierarchyLevel":

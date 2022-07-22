@@ -505,9 +505,9 @@ def saveTweakedModelFile( args, params, x, fnames ):
     findSim.saveTweakedModel( fnames["model"], fnames["optfile"], fnames["map"], changes)
 
 def analyzeResults(fp, dumpData, results, params, eret, optTime, verbose=True):
-    print( "RES.x = ", results.x )
-    print( "RES.initParams = ", results.initParams )
-    print( "Params = ", params )
+    #print( "RES.x = ", results.x )
+    #print( "RES.initParams = ", results.initParams )
+    #print( "Params = ", params )
 
     assert( len(results.x) == len( params ) )
     assert( len(results.x) == len( results.initParams ) )
