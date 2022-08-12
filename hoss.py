@@ -84,7 +84,7 @@ def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
     totInitScore = 0.0
     totAltScore = 0.0
     for (results, eret, optTime, paramArgs) in retvec:
-        multi_param_minimization.analyzeResults( fp, True, results, paramArgs, eret, optTime, False ) # Last arg is 'verbose'
+        multi_param_minimization.analyzeResults( fp, True, results, paramArgs, eret, optTime, baseargs["scoreFunc"], verbose = False ) # Last arg is 'verbose'
         totScore += results.fun
         initScore, altScore = combineScores( eret )
         totAltScore += altScore

@@ -377,6 +377,7 @@ def main():
     parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of simulation as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-b', '--optblock', type = str, help='Optional: Block name to optimize in case we have loaded a Hoss.json file with multiple optimization blocks.', default = "" )
     parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "gsl".', default = "gsl" )
+    parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation.', default = "NRMS" )
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     parser.add_argument( '-st', '--show_ticker', action="store_true", help="Flag: default False. Prints out ticker as optimization progresses.")
     args = parser.parse_args()
@@ -395,7 +396,7 @@ def main():
     if len( fnames["resultfile"] ) > 0:
         fp = open( fnames["resultfile"], "w" )
         dumpData = True
-    analyzeResults( fp, dumpData, results, paramArgs, eret, optTime )
+    analyzeResults( fp, dumpData, results, paramArgs, eret, optTime, args.scoreFunc )
     if len( fnames["resultfile"] ) > 0:
         fp.close()
     if len( fnames["optfile"] ) > 0:
@@ -403,27 +404,22 @@ def main():
         dumpData = False
 
 def findInitialParams( expts, modelFile, mapFile, paramArgs, solver ):
-    mergedInitParams = [-2.0] * len( paramArgs )
-    numBad = 0
-    sp = []
+    if len( paramArgs ) == 0:
+        raise KeyError( "multi_param_minimization.py::findInitialParams: Quit because no paramArgs were given" )
+    initParams = findSim.getInitParams( modelFile, mapFile, paramArgs )
 
-    for p in paramArgs:
-        sp.extend( p.split('.') )
-        sp.append( 1.0 )
+    if initParams[0] == -1:
+        raise KeyError( "multi_param_minimization.py::findInitialParams: Quit because initParams[0] == -1" )
 
-    for ee in expts:
-        initParams = findSim.innerMain( ee[0], modelFile = modelFile, mapFile = mapFile, scaleParam = sp, getInitParamVal = True, ignoreMissingObj = True, silent = True, solver = solver )
-        if initParams[0] == -1:
-            raise KeyError( "multi_param_minimization.py::findInitialParams: Quit because initParams[0] == -1" )
-
-        for idx, ip in enumerate( initParams ):
-            if not math.isclose( ip, -2.0 ): # initParams has -2 if obj not found. This occurs sometimes when subsetting, so we have to skip this param.
-                mergedInitParams[idx] = ip
-        numBad = sum( [ math.isclose( mip, -2.0 ) for mip in mergedInitParams] )
-        if numBad == 0:
-            break;
-        elif numBad == len( initParams ):
-            raise KeyError( "No valid params in multi_param_minimization::innerMain for expt = " + ee[0] )
+    '''
+    for idx, ip in enumerate( initParams ):
+        if not math.isclose( ip, -2.0 ): # initParams has -2 if obj not found. This occurs sometimes when subsetting, so we have to skip this param.
+            mergedInitParams[idx] = ip
+    numBad = sum( [ math.isclose( mip, -2.0 ) for mip in mergedInitParams] )
+    if numBad == 0:
+        break;
+    elif numBad == len( initParams ):
+        raise KeyError( "No valid params in multi_param_minimization::innerMain for expt = " + ee[0] )
 
     for pa, mip in zip( paramArgs, mergedInitParams ):
         if math.isclose( mip, -2.0 ):
@@ -432,6 +428,8 @@ def findInitialParams( expts, modelFile, mapFile, paramArgs, solver ):
         raise KeyError( "Invalid params in multi_param_minimization" )
 
     return mergedInitParams
+    '''
+    return initParams
 
 
 def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "SLSQP", paramBounds = {}, solver = "gsl" ):
@@ -447,7 +445,11 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     # By default, set the bounds in the range of 0.01 to 100x original.
     params = []
     bounds = []
+    inits = []
     for i, ip in zip( paramArgs, initParams ):
+        if math.isclose( ip, -2.0 ):    # Skip missing params.
+            continue
+        inits.append( ip )
         spl = i.rsplit( '.',1 ) # i is of the form: object.field
         assert( len(spl) == 2 )
         params.append( i )
@@ -473,7 +475,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
         return ( DummyResult(len(params) ), eret, time.time() - t0 )
     initScore = ev.score
     #print( "INIT SCORE = ", initScore )
-    initVec = [ b.invFunc(p) for b, p in zip( bounds, initParams ) ]
+    initVec = [ b.invFunc(p) for b, p in zip( bounds, inits ) ]
     #for b, p in zip( bounds, initParams ):
     #print( ["{:.3f} {:.3f}".format( p, b.invFunc(p) ) for b, p in zip( bounds, initParams)] )
     #print( "INITVec = ", initVec )
@@ -504,7 +506,7 @@ def saveTweakedModelFile( args, params, x, fnames ):
     # dumps the modified file.
     findSim.saveTweakedModel( fnames["model"], fnames["optfile"], fnames["map"], changes)
 
-def analyzeResults(fp, dumpData, results, params, eret, optTime, verbose=True):
+def analyzeResults(fp, dumpData, results, params, eret, optTime, scoreFunc, verbose=True):
     #print( "RES.x = ", results.x )
     #print( "RES.initParams = ", results.initParams )
     #print( "Params = ", params )
@@ -513,7 +515,7 @@ def analyzeResults(fp, dumpData, results, params, eret, optTime, verbose=True):
     assert( len(results.x) == len( results.initParams ) )
     sys.stdout.flush()
     out = [ "-------------------------------------------------------------"]
-    out.append( "Minimization runtime = {:.3f} sec".format( optTime ) )
+    out.append( "scoreFunc = {}, Minimization runtime = {:.3f} sec".format( scoreFunc, optTime ) )
     #sx = [ sigmoid( j ) for j in results.x ]
     sx = results.x
     out.append( "Parameter              Initial Value     Final Value          Ratio ")
