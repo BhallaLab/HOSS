@@ -256,6 +256,8 @@ class EvalFunc:
                 paramList.append( b.func(j) )
                 #print( "{} = {:.3f}".format( i, b.func(j) ))
             #print( "{}".format( paramList ) )
+        if boundsPenalty > 0.0:
+            return boundsPenalty + 1.0
 
         if len( self.expts ) == 1:
             k = self.expts[0]
@@ -290,7 +292,7 @@ class EvalFunc:
         sumScore = sum([ pow( s, ScorePow )*e[1] for s, e in zip(self.score, self.expts) if s>=0.0])
         sumWts = sum( [ e[1] for s, e in zip(self.score, self.expts) if s>=0.0 ] )
         #print("RET = {:.3f}".format( pow( sumScore/sumWts, 1.0/ScorePow )))
-        return pow( sumScore/sumWts, 1.0/ScorePow ) + boundsPenalty
+        return pow( sumScore/sumWts, 1.0/ScorePow )
 
 def optCallback( x ):
     global ev
