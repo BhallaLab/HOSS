@@ -66,6 +66,10 @@ class Bounds:
     def __init__( self, lo, hi, isLinear = False ):
         self.lo = lo
         self.hi = hi
+        self.penaltyLowBound = 0.2
+        self.penaltyHighBound = 1.0 - self.penaltyLowBound
+        self.penaltySlope = 0.5 / self.penaltyLowBound
+        self.name = ""
         if isLinear:
             self.range = self.hi - self.lo
             self.func = self.linBounds
@@ -78,10 +82,36 @@ class Bounds:
             self.func = self.expBounds
 
     def linBounds( self, x ): # returns a value linearly between lo and hi
+        #return x
         return self.smootherstep( x ) * self.range + self.lo
 
     def expBounds( self, x ): # value exponentially between lo and hi
+        #return self.lo * np.exp( x * self.range )
         return self.lo * np.exp( self.smootherstep(x) * self.range )
+
+    def boundsPenalty( self, x ): # Penalty to score for values outside bounds
+        ret = 0.0
+        if x < self.penaltyLowBound:
+            ret = self.penaltySlope * (self.penaltyLowBound - x)
+        elif x > self.penaltyHighBound:
+            ret = self.penaltySlope * (x - self.penaltyHighBound)
+        return ret * ret
+
+        '''
+        for x in xvec:
+            y = 0.0
+            if x < self.penaltyLowBound:
+                y = self.penaltySlope * (self.penaltyLowBound - x)
+            elif x > self.penaltyHighBound:
+                y =  self.penaltySlope * (x - self.penaltyHighBound)
+            ret += y * y
+        return np.sqrt( ret / len( xvec ) )
+        '''
+
+    def newInvFunc( self, p ): 
+        if self.func == self.linBounds:
+            return p
+        return np.log( p/self.lo )/self.range
 
     def invFunc( self, p ): 
         # func( x in range 0..1 ) = paramValue
@@ -196,10 +226,20 @@ class EvalFunc:
     def doEval( self, x ):
         ret = []
         paramList = []
+
+        boundsPenalty = 0.0
         if len( x ) > 0:
             if len(x) != len( self.params ):
                 print( "Warning: parameter vector length differs from # of params", len(x), "    ", len( self.params ), "    ", self.params )
             assert( len(x) == len( self.params) )
+            # radial distance of param from origin
+            bpsq = 0.0
+            for pb, param in zip( self.paramBounds, x ):
+                bpsq += pb.boundsPenalty( param )
+            boundsPenalty = np.sqrt( bpsq / len( x ) )
+            #boundsPenalty = self.paramBounds[0].boundsPenalty( rdist )
+            pb = self.paramBounds[-1]
+            print( "boundsPenalty = ", boundsPenalty, x, pb.name, pb.lo, pb.hi )
 
             for i, j, b in zip( self.params, x, self.paramBounds ):
                 spl = i.rsplit( '.' ,1)
@@ -246,7 +286,7 @@ class EvalFunc:
         sumScore = sum([ pow( s, ScorePow )*e[1] for s, e in zip(self.score, self.expts) if s>=0.0])
         sumWts = sum( [ e[1] for s, e in zip(self.score, self.expts) if s>=0.0 ] )
         #print("RET = {:.3f}".format( pow( sumScore/sumWts, 1.0/ScorePow )))
-        return pow( sumScore/sumWts, 1.0/ScorePow )
+        return pow( sumScore/sumWts, 1.0/ScorePow ) + boundsPenalty
 
 def optCallback( x ):
     global ev
@@ -461,6 +501,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
                 bounds.append( Bounds( MINIMUM_CONC, MIDDLE_CONC ) )
             else:
                 bounds.append( Bounds( ip * 0.01, ip * 100.0 ) )
+        bounds[-1].name = i
         #print( "{} = {:.4g}, bounds = {:.4g}, {:.4g}".format( i, ip, bounds[-1].lo, bounds[-1].hi ) )
             #bounds.append( defaultBounds.get( spl[1] ) )
     #print( "PARAMS = ", params )
@@ -476,8 +517,13 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     initScore = ev.score
     #print( "INIT SCORE = ", initScore )
     initVec = [ b.invFunc(p) for b, p in zip( bounds, inits ) ]
-    #for b, p in zip( bounds, initParams ):
+    for b, p in zip( bounds, inits ):
+        lo = b.func(b.penaltyLowBound)
+        hi = b.func(b.penaltyHighBound)
+        if p <lo or p > hi:
+            print( "Warning: Initial value {} of parameter {} is outside specified bounds {} to {}".format( p, b.name, lo, hi ) )
     #print( ["{:.3f} {:.3f}".format( p, b.invFunc(p) ) for b, p in zip( bounds, initParams)] )
+    #print( "INITs = ", inits )
     #print( "INITVec = ", initVec )
     #print( "INITParms = ", initParams )
     
