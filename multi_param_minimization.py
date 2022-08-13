@@ -58,6 +58,7 @@ ev = ""
 ScorePow = 2.0
 MINIMUM_CONC = 1e-10
 MIDDLE_CONC = 1e-3
+PENALTY_SLOPE = 1.0
 
 class Bounds:
     '''
@@ -90,6 +91,7 @@ class Bounds:
         return self.lo * np.exp( self.smootherstep(x) * self.range )
 
     def boundsPenalty( self, x ): # Penalty to score for values outside bounds
+        ret = (x - 0.5) * (x - 0.5 )
         ret = 0.0
         if x < self.penaltyLowBound:
             ret = self.penaltySlope * (self.penaltyLowBound - x)
@@ -232,14 +234,16 @@ class EvalFunc:
             if len(x) != len( self.params ):
                 print( "Warning: parameter vector length differs from # of params", len(x), "    ", len( self.params ), "    ", self.params )
             assert( len(x) == len( self.params) )
-            # radial distance of param from origin
+            # radial distance of param from origin, which centers at 0.5,0.5
             bpsq = 0.0
             for pb, param in zip( self.paramBounds, x ):
-                bpsq += pb.boundsPenalty( param )
-            boundsPenalty = np.sqrt( bpsq / len( x ) )
+                bpsq += (0.5 - param) * (0.5 - param)
+            r = np.sqrt( bpsq )
+            boundsPenalty = PENALTY_SLOPE * max( r - 0.5, 0.0 )
             #boundsPenalty = self.paramBounds[0].boundsPenalty( rdist )
             pb = self.paramBounds[-1]
-            print( "boundsPenalty = ", boundsPenalty, x, pb.name, pb.lo, pb.hi )
+            #print( "boundsPenalty = ", boundsPenalty, x, pb.name, pb.lo, pb.hi )
+            print( "boundsPenalty = ", boundsPenalty, x )
 
             for i, j, b in zip( self.params, x, self.paramBounds ):
                 spl = i.rsplit( '.' ,1)
