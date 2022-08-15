@@ -243,8 +243,7 @@ class EvalFunc:
             bpsq = 0.0
             for pb, param in zip( self.paramBounds, x ):
                 bpsq += (0.5 - param) * (0.5 - param)
-            r = np.sqrt( bpsq )
-            boundsPenalty = 1.0 + PENALTY_SLOPE * max( r - 0.5, 0.0 )
+            boundsPenalty = 1.0 + PENALTY_SLOPE * max( bpsq - 0.25, 0.0 )
 
             for i, j, b in zip( self.params, x, self.paramBounds ):
                 spl = i.rsplit( '.' ,1)
