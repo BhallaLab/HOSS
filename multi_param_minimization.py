@@ -84,11 +84,13 @@ class Bounds:
 
     def linBounds( self, x ): # returns a value linearly between lo and hi
         #return x
-        return self.smootherstep( x ) * self.range + self.lo
+        #return self.smootherstep( x ) * self.range + self.lo
+        return self.sigmoid( x ) * self.range + self.lo
 
     def expBounds( self, x ): # value exponentially between lo and hi
         #return self.lo * np.exp( x * self.range )
-        return self.lo * np.exp( self.smootherstep(x) * self.range )
+        #return self.lo * np.exp( self.smootherstep(x) * self.range )
+        return self.lo * np.exp( self.sigmoid(x) * self.range )
 
     def boundsPenalty( self, x ): # Penalty to score for values outside bounds
         ret = (x - 0.5) * (x - 0.5 )
@@ -146,6 +148,9 @@ class Bounds:
             x = 1.0
         x = x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
         return x
+
+    def sigmoid( self, x ):
+        return 0.5 + np.tanh( 2.0 * x - 1 )  / 2.0 
 
 defaultBounds = {
         "conc":Bounds(1e-9, 100.0), 
@@ -229,21 +234,10 @@ class EvalFunc:
         ret = []
         paramList = []
 
-        boundsPenalty = 0.0
         if len( x ) > 0:
             if len(x) != len( self.params ):
                 print( "Warning: parameter vector length differs from # of params", len(x), "    ", len( self.params ), "    ", self.params )
             assert( len(x) == len( self.params) )
-            # radial distance of param from origin, which centers at 0.5,0.5
-            bpsq = 0.0
-            for pb, param in zip( self.paramBounds, x ):
-                bpsq += (0.5 - param) * (0.5 - param)
-            r = np.sqrt( bpsq )
-            boundsPenalty = PENALTY_SLOPE * max( r - 0.5, 0.0 )
-            #boundsPenalty = self.paramBounds[0].boundsPenalty( rdist )
-            pb = self.paramBounds[-1]
-            #print( "boundsPenalty = ", boundsPenalty, x, pb.name, pb.lo, pb.hi )
-            print( "boundsPenalty = ", boundsPenalty, x )
 
             for i, j, b in zip( self.params, x, self.paramBounds ):
                 spl = i.rsplit( '.' ,1)
@@ -256,8 +250,6 @@ class EvalFunc:
                 paramList.append( b.func(j) )
                 #print( "{} = {:.3f}".format( i, b.func(j) ))
             #print( "{}".format( paramList ) )
-        if boundsPenalty > 0.0:
-            return boundsPenalty + 1.0
 
         if len( self.expts ) == 1:
             k = self.expts[0]
