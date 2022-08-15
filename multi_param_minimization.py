@@ -233,11 +233,18 @@ class EvalFunc:
     def doEval( self, x ):
         ret = []
         paramList = []
+        boundsPenalty = 1.0     # It is a scaling factor.
 
         if len( x ) > 0:
             if len(x) != len( self.params ):
                 print( "Warning: parameter vector length differs from # of params", len(x), "    ", len( self.params ), "    ", self.params )
             assert( len(x) == len( self.params) )
+            # radial distance of param from origin, which centers at 0.5,0.5
+            bpsq = 0.0
+            for pb, param in zip( self.paramBounds, x ):
+                bpsq += (0.5 - param) * (0.5 - param)
+            r = np.sqrt( bpsq )
+            boundsPenalty = 1.0 + PENALTY_SLOPE * max( r - 0.5, 0.0 )
 
             for i, j, b in zip( self.params, x, self.paramBounds ):
                 spl = i.rsplit( '.' ,1)
@@ -284,7 +291,10 @@ class EvalFunc:
         sumScore = sum([ pow( s, ScorePow )*e[1] for s, e in zip(self.score, self.expts) if s>=0.0])
         sumWts = sum( [ e[1] for s, e in zip(self.score, self.expts) if s>=0.0 ] )
         #print("RET = {:.3f}".format( pow( sumScore/sumWts, 1.0/ScorePow )))
-        return pow( sumScore/sumWts, 1.0/ScorePow )
+        ret = pow( sumScore/sumWts, 1.0/ScorePow )
+        print( "ret = {:.3f}, penalty = {:.3f}, final score = {:.3f}".format( ret, boundsPenalty, ret * boundsPenalty ) )
+
+        return ret * boundsPenalty
 
 def optCallback( x ):
     global ev
