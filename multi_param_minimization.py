@@ -65,6 +65,7 @@ class Bounds:
     This class maintains bounds for each parameter, and provides for conversions. All inputs are expected to be in the range 0..1. The bounds.func will take the input x in this range and return a value within the bounds. It can use either exponential or linear scaling within the range, exponential is the default. It also has a function to return the inverse transform value, which is useful to get a number between 0..1 for which the Bounds.func will return the starting value of the parameter. For symmetric exponential and symmetric linear ranges, this value is 0.5.
     '''
     def __init__( self, lo, hi, isLinear = False ):
+        self.initParam = 1.0
         self.lo = lo
         self.hi = hi
         self.penaltyLowBound = 0.2
@@ -220,6 +221,8 @@ class EvalFunc:
         self.runtime = 0.0
         self.loadtime = 0.0
         self.paramAccessTime = 0.0
+        self.sumScore = 0.0
+        self.boundsPenalty = 0.0
 
     def procTicker( self, result ):
         if self.showTicker:
@@ -228,7 +231,11 @@ class EvalFunc:
         self.numCalls += 1
         if self.showTicker:
             if self.numCalls % 50 == 0:
-                print( " {}".format( self.numCalls ) )
+                if self.sumScore > 0.0:
+                    print( " {} It={} scr={:.3f}+{:.3f} ".format( self.numCalls, self.numIter, self.sumScore, self.boundsPenalty ) )
+                    self.sumScore = 0.0
+                else:
+                    print( " {} It={} ".format( self.numCalls, self.numIter, ) )
 
     def doEval( self, x ):
         ret = []
@@ -252,29 +259,19 @@ class EvalFunc:
                 paramList.append( obj )
                 paramList.append( str(field) )
                 #paramList.append( field.encode( "ascii") )
-                #y = 0.01 + 99.99 / ( 1 + np.exp( -j ) )
                 paramList.append( b.func(j) )
-                #print( "{} = {:.3f}".format( i, b.func(j) ))
-            #print( "{}".format( paramList ) )
 
         if len( self.expts ) == 1:
             k = self.expts[0]
             ret.append( findSim.innerMain( k[0], scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose, solver = self.solver ))
-            #print( "RET ===========", ret )
             self.ret = { e[0]:i for i, e in zip( ret, sorted(self.expts) ) }
         else:
             for k in sorted(self.expts):
-                #print ("ssssssssssssssscoreFunc = ", k[2] )
                 ret.append( self.pool.apply_async( findSim.innerMain, (k[0],), dict(scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose, solver = self.solver ), callback = dumbTicker ) )
-            #print( "RET ===========", ret )
             self.ret = { e[0]:i.get() for i, e in zip( ret, sorted(self.expts) ) }
         #print( "  = {} {}".format( len( ret ), ret ) )
-        #self.ret = [ i.get() for i in ret ]
-        #self.ret = { e[0]:i.get() for i, e in zip( ret, self.expts ) }
-        #print( "{}".format( self.ret[0] ) )
         self.score = []
         numFailures = 0
-        #for key, val in self.ret.items():
         for key in sorted( self.ret ):
             val = self.ret[key]
             self.score.append( val[0] )
@@ -289,10 +286,10 @@ class EvalFunc:
             return -1.0
         sumScore = sum([ pow( s, ScorePow )*e[1] for s, e in zip(self.score, self.expts) if s>=0.0])
         sumWts = sum( [ e[1] for s, e in zip(self.score, self.expts) if s>=0.0 ] )
-        #print("RET = {:.3f}".format( pow( sumScore/sumWts, 1.0/ScorePow )))
         ret = pow( sumScore/sumWts, 1.0/ScorePow )
-        print( "ret = {:.3f}, penalty = {:.3f}, final score = {:.3f}".format( ret, boundsPenalty, ret + boundsPenalty ) )
-
+        #print( "ret = {:.3f}, penalty = {:.3f}, final score = {:.3f}".format( ret, boundsPenalty, ret + boundsPenalty ) )
+        self.sumScore = ret
+        self.boundsPenalty = boundsPenalty
         return ret + boundsPenalty
 
 def optCallback( x ):
@@ -303,8 +300,14 @@ def optCallback( x ):
     print ("\nIter {}: [".format( ev.numIter ), end = "" )
     #sx = [ sigmoid( j ) for j in x ]
     sx = x
-    for i in sx:
-        print ("{:.3f}  ".format( i ), end = "" )
+    for xx, b in zip( sx, ev.paramBounds ):
+        newParam = b.func(xx)
+        if b.initParam > 1e-16:
+            print ("{:.2f}  ".format( newParam/b.initParam ), end = "" )
+        else:
+            print ("{:.2f}  ".format( newParam ), end = "" )
+    #for i in sx:
+        #print ("{:.3f}  ".format( i ), end = "" )
     print( "]" )
 
 def runOptFromCommandLine( args ):
@@ -509,6 +512,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
             else:
                 bounds.append( Bounds( ip * 0.01, ip * 100.0 ) )
         bounds[-1].name = i
+        bounds[-1].initParam = ip
         #print( "{} = {:.4g}, bounds = {:.4g}, {:.4g}".format( i, ip, bounds[-1].lo, bounds[-1].hi ) )
             #bounds.append( defaultBounds.get( spl[1] ) )
     #print( "PARAMS = ", params )
