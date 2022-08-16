@@ -243,7 +243,7 @@ class EvalFunc:
             bpsq = 0.0
             for pb, param in zip( self.paramBounds, x ):
                 bpsq += (0.5 - param) * (0.5 - param)
-            boundsPenalty = 1.0 + PENALTY_SLOPE * max( bpsq - 0.25, 0.0 )
+            boundsPenalty = PENALTY_SLOPE * max( bpsq - 0.25, 0.0 )
 
             for i, j, b in zip( self.params, x, self.paramBounds ):
                 spl = i.rsplit( '.' ,1)
@@ -291,9 +291,9 @@ class EvalFunc:
         sumWts = sum( [ e[1] for s, e in zip(self.score, self.expts) if s>=0.0 ] )
         #print("RET = {:.3f}".format( pow( sumScore/sumWts, 1.0/ScorePow )))
         ret = pow( sumScore/sumWts, 1.0/ScorePow )
-        print( "ret = {:.3f}, penalty = {:.3f}, final score = {:.3f}".format( ret, boundsPenalty, ret * boundsPenalty ) )
+        print( "ret = {:.3f}, penalty = {:.3f}, final score = {:.3f}".format( ret, boundsPenalty, ret + boundsPenalty ) )
 
-        return ret * boundsPenalty
+        return ret + boundsPenalty
 
 def optCallback( x ):
     global ev
