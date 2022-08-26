@@ -541,10 +541,10 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     #print( "INIT SCORE = ", initScore )
     initVec = [ b.invFunc(p) for b, p in zip( bounds, inits ) ]
     for b, p in zip( bounds, inits ):
-        lo = b.func(b.penaltyLowBound)
-        hi = b.func(b.penaltyHighBound)
-        if p <lo or p > hi:
-            print( "Warning: Initial value {} of parameter {} is outside specified bounds {} to {}".format( p, b.name, lo, hi ) )
+        #lo = b.func(b.penaltyLowBound)
+        #hi = b.func(b.penaltyHighBound)
+        if p < b.lo or p > b.hi:
+            print( "Warning: Initial value {} of parameter {} is outside specified bounds {} to {}".format( p, b.name, b.lo, b.hi ) )
     #print( ["{:.3f} {:.3f}".format( p, b.invFunc(p) ) for b, p in zip( bounds, initParams)] )
     #print( "INITs = ", inits )
     #print( "INITVec = ", initVec )
