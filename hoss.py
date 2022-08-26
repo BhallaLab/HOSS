@@ -43,11 +43,15 @@ but for clusters it may be necessary to also have a route through mpi4py.
 from __future__ import print_function
 import argparse
 import json
+import jsonschema
+import os
 import time
 from multiprocessing.pool import ThreadPool
 import multi_param_minimization
 
 ScorePow = 2.0
+
+HOSS_SCHEMA = "hossSchema.json"
 
 def runJson( key, val, baseargs ):
     ''' a dummy function for testing '''
@@ -124,8 +128,8 @@ def main():
     parser = argparse.ArgumentParser( description = 
             'This script orchestrates multilevel optimization, first over many individual pathways, then over the cross-talk between them, and possibly further levels.  It uses a JSON file for configuring the optimization.  Since the individual optimizations can go in parallel, the system spreads out the load into many individual multi-parameter optimization runs, which can be run in parallel.' )
     parser.add_argument( 'config', type = str, help='Required: JSON configuration file for doing the optimization.')
-    parser.add_argument( '-t', '--tolerance', type = float, help='Optional: Tolerance criterion for completion of minimization', default = 1e-4 )
-    parser.add_argument( '-a', '--algorithm', type = str, help='Optional: Algorithm name to use, from the set available to scipy.optimize.minimize. Options are CG, Nelder-Mead, Powell, BFGS, COBYLA, SLSQP, trust-constr. The library has other algorithms but they either require Jacobians or they fail outright. There is also L-BFGS-B which handles bounded solutions, but this is not needed here because we already take care of bounds. SLSQP works well and is the default.', default = "SLSQP" )
+    parser.add_argument( '-t', '--tolerance', type = float, help='Optional: Tolerance criterion for completion of minimization' )
+    parser.add_argument( '-a', '--algorithm', type = str, help='Optional: Algorithm name to use, from the set available to scipy.optimize.minimize. Options are CG, Nelder-Mead, Powell, BFGS, COBYLA, SLSQP, trust-constr. The library has other algorithms but they either require Jacobians or they fail outright. There is also L-BFGS-B which handles bounded solutions, but this is not needed here because we already take care of bounds. SLSQP works well and is the default.' )
     parser.add_argument( '-b', '--blocks', nargs='*', default=[],  help='Blocks to execute within the JSON file. Defaults to empty, in which case all of them are executed. Each block is the string identifier for the block in the JSON file.' )
     parser.add_argument( '-m', '--model', type = str, help='Optional: Composite model definition file. First searched in directory "location", then in current directory.' )
     parser.add_argument( '-map', '--map', type = str, help='Model entity mapping file. This is a JSON file.' )
@@ -133,28 +137,50 @@ def main():
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-p', '--parallel', type = str, help='Optional: Define parallelization model. Options: serial, MPI, threads. Defaults to serial. MPI not yet implemented', default = "serial" )
     parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
-    parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation.', default = "NRMS" )
-    parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "gsl".', default = "gsl" )
+    parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation. Default: NRMS' )
+    parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "LSODA".', default = "LSODA" )
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     parser.add_argument( '-st', '--show_ticker', action="store_true", help="Flag: default False. Prints out ticker as optimization progresses.")
     args = parser.parse_args()
 
+    # Load and validate the config file
     try:
         with open( args.config ) as json_file:
             config = json.load( json_file )
+            relpath = os.path.dirname( __file__ )
+            if relpath != '': # outside local directory
+                #relpath = relpath + '/'
+                fs = relpath + '/' + HOSS_SCHEMA
+            else:
+                fs = HOSS_SCHEMA
+
+            with open( fs ) as _schema:
+                schema = json.load( _schema )
+                jsonschema.validate( config, schema )
     except IOError:
         print( "Error: Unable to find HOSS config file: " + args.config )
         quit()
 
     blocks = config["HOSS"]
+
+    # requiredDefaultArgs is set here in case neither the config file nor 
+    # the command line has the argument. We can't use default args in 
+    # argparser as this would override the config file.
+    #requiredDefaultArgs = { "tolerance": 0.001, "scoreFunc": "NRMS", "algorithm": "SLSQP", "solver": "LSODA" } 
     #basekeys = ["model", "map", "exptDir", "scoreFunc", "tolerance"]
-    basekeys = vars( args ).keys()
+    #basekeys = vars( args ).keys()
     baseargs = vars( args )
+    isCommandLine = {}
     for key, val in config.items():
-        if key in basekeys:
+        if key in baseargs:
             # Use config file setting if not passed in on command line.
             if baseargs[key] == "" or baseargs[key] == None:
                 baseargs[key] = val
+                isCommandLine[key] = False
+            else:
+                isCommandLine[key] = True
+    #for key, val in baseargs.items():
+        #print( key, val )
 
     # Build up optimization blocks. Within a block we assume that the
     # individual optimizations do not interact and hence can run in 
@@ -189,11 +215,11 @@ def main():
         # must be wrapped up before we go to the next level of heirarchy.
         t1 = time.time()
         if args.parallel == "serial":
-            score = runOptSerial( optBlock, baseargs )
+            score = runOptSerial( optBlock, baseargs, isCommandLine )
         elif args.parallel == "threads":
-            score = runOptThreads( optBlock, baseargs )
+            score = runOptThreads( optBlock, baseargs, isCommandLine )
         elif args.parallel == "MPI":
-            score = runOptMPI( optBlock, baseargs )
+            score = runOptMPI( optBlock, baseargs, isCommandLine )
         t2 = time.time()
         # This saves the scores and the intermediate opt file, to use for
         # next level of optimization.
@@ -204,29 +230,29 @@ def main():
         results.append( score )
     processFinalResults( results, baseargs, intermed, time.time() - t0  )
 
-def runOptSerial( optBlock, baseargs ):
+def runOptSerial( optBlock, baseargs, isCommandLine ):
     score = []
-    for name, pathway in optBlock.items():
-        score.append( multi_param_minimization.runJson( name, pathway, baseargs ) )
+    for name, ob in optBlock.items():
+        score.append( multi_param_minimization.runJson(name, ob, baseargs, isCommandLine ) )
         initScore, optScore = combineScores (score[-1][1] )
         print( "OptSerial {:20s} Init={:.3f}     Opt={:.3f}     Time={:.3f}s".format(name, initScore, optScore, score[-1][2] ) )
         # optScore == score[-1][0].fun
 
     return score
 
-def runOptThreads( optModel, itemName, item, baseargs ):
+def runOptThreads( optBlock, baseargs, isCommandLine ):
     score = []
-    pool = ThreadPool( processes = len( optBlocks ) )
-    ret = [pool.apply_async( multi_param_minimization.runJson, args=( key, val, baseargs ) ) for key, val in  optBlocks.items() ]
+    pool = ThreadPool( processes = len( optBlock ) )
+    ret = [pool.apply_async( multi_param_minimization.runJson, args=( key, val, baseargs ) ) for key, val in  optBlock.items() ]
     score.append( multi_param_minimization.runJson( itemName, item, baseargs ) )
 
-    return score, optModel
+    return score
 
-def runOptMPI( optModel, itemName, item, baseargs ):
+def runOptMPI( optBlock, baseargs, isCommandLine ):
     score = []
     score.append( multi_param_minimization.runJson( itemName, item, baseargs ) )
 
-    return score, optModel
+    return score
         
 # Run the 'main' if this script is executed standalone.
 if __name__ == '__main__':

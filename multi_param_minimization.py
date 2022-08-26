@@ -52,7 +52,7 @@ import json
 import findSim
 from multiprocessing import Pool
 
-defaultScoreFunc = "(expt-sim)*(expt-sim) / (datarange*datarange+1e-9)"
+defaultScoreFunc = "NRMS"
 ev = ""
 #algorithm = 'SLSQP'
 ScorePow = 2.0
@@ -350,9 +350,10 @@ def runOptFromJson( args ):
     with open( args.location ) as json_file:
         config = json.load( json_file )
     blocks = config["HOSS"]
-    basekeys = ["model", "map", "exptDir", "scoreFunc", "tolerance"]
+    basekeys = ["model", "map", "exptDir", "scoreFunc", "tolerance", "algorithm"]
     baseargs = {"exptDir": "./", "tolerance": 1e-4, "show_ticker": args.show_ticker, "algorithm": args.algorithm, "solver": args.solver}
     v = vars( args )
+    isCommandLine = {}
     for key, val in config.items():
         if key in basekeys:
             baseargs[key] = val
@@ -360,6 +361,9 @@ def runOptFromJson( args ):
             if vk:
                 #baseargs[key] = args[key]
                 baseargs[key] = vk
+                isCommandLine[key] = True
+            else:
+                isCommandLine[key] = False
     #if len( args.resultfile ) == 0 
     for hossLevel in blocks:
         if hossLevel["hierarchyLevel"] == 1:
@@ -367,12 +371,12 @@ def runOptFromJson( args ):
                 for key, val in hossLevel.items():
                     if key != "name" and key != "hierarchyLevel":
                         fn = fnames( baseargs, val, args )
-                        ret =  runJson( key, val, baseargs, args.verbose )
+                        ret =  runJson( key, val, baseargs, isCommandLine, args.verbose )
                         return ret + fn
                         #return ret + ( baseargs["model"], baseargs["map"] )
             elif args.optblock in hossLevel:
                 val = hossLevel[ args.optblock ]
-                ret = runJson( args.optblock, val, baseargs, args.verbose )
+                ret = runJson( args.optblock, val, baseargs, isCommandLine, args.verbose )
                 return ret + fnames( baseargs, val, args )
                 #return ret + ( baseargs["model"], baseargs["map"] )
             else:
@@ -380,30 +384,38 @@ def runOptFromJson( args ):
                 quit()
     
 
-def runJson( optName, optDict, args, isVerbose = False ):
+def runJson( optName, optDict, args, isCommandLine, isVerbose = False ):
     #print( "RJRJRJRJRJ..........", optName, "\n", "\n", args )
     # The optDict is the individual pathway opt spec from the HOSS Json file
     paramArgs = [ i for i in optDict["params"] ]
     #paramArgs = [ i.encode( "ascii") for i in optDict["params"] ]
-    if "scoreFunc" in args:
-        df = args["scoreFunc"]
-    else:
-        df = defaultScoreFunc
+    solver = args["solver"] # Should really be defined in expt.
+    tolerance = args["tolerance"]
+    if (not isCommandLine["tolerance"]) and "tolerance" in optDict:
+        tolerance = optDict["tolerance"]    # Override for specific block
+    algorithm = args["algorithm"]
+    if (not isCommandLine["algorithm"]) and "algorithm" in optDict:
+        algorithm = optDict["algorithm"]    # Override for specific block
+    scoreFunc = args["scoreFunc"]
+    if (not isCommandLine["scoreFunc"]) and "scoreFunc" in optDict:
+        scoreFunc = optDict["scoreFunc"]    # Override for specific block
+
     ed = args["exptDir"] + "/"
     expts = []
     #print( "{}".format( optDict["expt"] ))
     for key, val in optDict["expt"].items():
-        if "scoreFunc" in val:
-            expts.append( (ed + key, val["weight"], val["scoreFunc"] ) )
-        else:
-            expts.append( (ed + key, val["weight"], df ) )
+        sf = scoreFunc
+        if (not isCommandLine["scoreFunc"]) and "scoreFunc" in val:
+            sf = val["scoreFunc"]
+        expts.append( (ed + key, val["weight"], sf ) )
+        #print( "Expt {}   sf = {}".format( key, sf ) )
     expts = sorted(expts)
     if "paramBounds" in optDict:
         paramBounds = { key: Bounds(val[0], val[1], val[2]) for key, val in optDict["paramBounds"].items() }
     else:
         paramBounds = {}
 
-    ret = innerMain( paramArgs, expts, args["model"], args["map"], isVerbose, args["tolerance"], showTicker = args["show_ticker"], algorithm = args["algorithm"], paramBounds = paramBounds, solver = args["solver"] )
+    ret = innerMain( paramArgs, expts, args["model"], args["map"], isVerbose, tolerance, showTicker = args["show_ticker"], algorithm = algorithm, paramBounds = paramBounds, solver = solver )
     return ret + ( paramArgs, )
     
 def extractStatus():
@@ -545,6 +557,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     else:
         callback = optCallback
 
+    #print( "al = ", algorithm, "        sol = ", solver, "      tol = ", tolerance )
     results = optimize.minimize( ev.doEval, initVec, method= algorithm, tol = tolerance, callback = callback )
     eret = [ { "expt":e[0], "weight":e[1], "score": s, "initScore": i} for e, s, i in zip( sorted(ev.expts), ev.score, initScore ) ]
     results.x = [ b.func( x ) for x, b in zip( results.x, ev.paramBounds ) ]

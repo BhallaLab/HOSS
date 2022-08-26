@@ -3,19 +3,20 @@
 	"properties": {
 		"FileType": {"type": "string"},
 		"Version": {"type": "string"},
-		"developer": {"type": "string"},
+		"author": {"type": "string"},
 		"model": {"type": "string"},
 		"map": {"type": "string"},
 		"exptDir": {"type": "string"},
 		"scoreFunc": {"type": "string"},
 		"tolerance": {"type": "number"},
+		"algorithm": {"type": "string"},
+		"comment": { "type": "string" },
 		"HOSS" : {"type": "array",
 			"items": {"type": "object",
 				"properties": {
 					"name": {"type": "string" },
 					"hierarchyLevel": {"type": "number" },
-					"comment": { "type": "string" },
-					"scoreFunc": { "type": "string" }
+					"comment": { "type": "string" }
 				},
 				"required": ["hierarchyLevel"],
 				"additionalProperties": {"type": "object",
@@ -24,7 +25,9 @@
 						"resultFile": { "type": "string" },
 						"optModelFile": { "type": "string" },
 						"optParamFile": { "type": "string" },
+						"scoreFunc": { "type": "string" },
 						"tolerance": { "type": "number" },
+						"algorithm": { "type": "string" },
 						"expt": {"type": "object",
 							"additionalProperties": { "type": "object",
 								"properties": {
@@ -32,7 +35,8 @@
 									"weight": {"type": "number" },
 									"comment": {"type": "string" }
 								},
-								"required": ["weight"]
+								"required": ["weight"],
+								"additionalProperties": false
 							}
 						},
 						"params": { "type" : "array",
@@ -40,7 +44,7 @@
 						},
 						"paramBounds": { "type" : "object",
 							"additionalProperties": { "type": "array",
-								"items": [
+								"prefixItems": [
 									{"type": "number"},
 									{"type": "number"},
 									{"enum": [0, 1]}
@@ -48,11 +52,12 @@
 							}
 						}
 					},
-					"required": ["expt", "params"]
+					"required": ["expt", "params"],
+					"additionalProperties": false
 				}
 			}
 		}
 	},
-	"required": ["model", "map", "HOSS"]
-
+	"required": ["model", "map", "HOSS", "scoreFunc", "tolerance", "algorithm"],
+	"additionalProperties": false
 }
