@@ -50,6 +50,10 @@ def logResult(result):
     # results is modified only by the main process, not the pool workers.
     results.append(result)
 
+def worker( fname, returnDict, scoreFunc, modelFile, mapFile, silent, solver  ):
+    score, elapsedTime, diagnostics = findSim.innerMain( fname, scoreFunc = scoreFunc, modelFile = modelFile, mapFile = mapFile, hidePlot = False, ignoreMissingObj = True, silent = silent, solver = solver )
+    returnDict[fname] = score
+
 def main():
     parser = argparse.ArgumentParser( description = 
             'This script displays simulation results compared with experiments for all the experiments defined in the optimization configuration file (a json file). It runs in serial.')
@@ -100,11 +104,23 @@ def main():
     #pool = Pool( processes = len( edict ) )
     ret = []
     exptDir = config["exptDir"]
+    manager = multiprocessing.Manager()
+    returnDict = manager.dict()
     for key, val in edict.items(): # Iterate through blocks
+        jobs = []
         for f in val: # Iterate through each expt (tsv or json) fname
             fname = exptDir + "/" + f
-            p = multiprocessing.Process( target = findSim.innerMain, args = ( fname,), kwargs = dict( scoreFunc = scoreFunc, modelFile = model, mapFile = mapfile, hidePlot = False, ignoreMissingObj = True, silent = not args.verbose, solver = args.solver ) )
+            p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = scoreFunc, modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = args.solver ) )
+            jobs.append(p)
             p.start()
+        for proc in jobs:
+            proc.join()
+        totScore = 0.0
+        for key, val in returnDict.items():
+            #print( "{:50s}{:.4f}".format( key, val ) )
+            totScore += val
+        print( "Mean Score = {:.4f}".format( totScore / len(returnDict) ) )
+
             #ret.append( pool.apply_async( findSim.innerMain, (fname,), dict( modelFile = model, mapFile = mapfile, hidePlot = False, silent = not args.verbose  ), callback = logResult ) )
 
     #time.sleep(5)
