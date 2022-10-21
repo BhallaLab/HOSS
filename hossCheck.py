@@ -36,7 +36,7 @@ optimization will succeed.
 * File requirements tests to ensure that all the referred files are present
 * Expt File correctness tests using Findsim-Schema.json
 * Field existence tests to ensure that all altered entities/parameters exist
-- Optimization sanity tests to ensure that we don't try to optimize too
+* Optimization sanity tests to ensure that we don't try to optimize too
     many parameters with too few experiments
 '''
 
@@ -194,7 +194,6 @@ def validateExperimentFiles( args, blocks, fsSchema ):
                                 print( err )
                                 fail = True
                                 continue
-                            #jsonschema.protocols.Validator.validate( exptDefn )
                             try:
                                 jsonschema.validate( exptDefn, fsSchema )
                                 print( ".", end = "", flush=True)
@@ -243,6 +242,33 @@ def checkModelObjectsExist( blocks, modelmap, objFields, modelMols ):
         quit()
     print( "\nValidated all {} parameters.".format( numParams ) )
 
+def warnTooManyParams( blocks, objFields ):
+    fail = False
+    maxSafeParams = 15
+    paramHisto = [0]*9
+    tooManyParams = 0
+    tooFewExpts = 0
+    numPathways = 0
+    for idx, bb in enumerate( blocks ):
+        for pname, pblock in bb.items():
+            if not pname in ["name", "hierarchyLevel"]:
+                numPathways += 1
+                numExpts = len( pblock['expt'] )
+                numParams = len( pblock['params'] )
+                if ( numParams > maxSafeParams ):
+                    print( "\nWarning: Too many params = {}, from {} expts in pathway '{}' in block {}".format( numParams, numExpts, pname, idx+1 ) )
+                    tooManyParams += 1
+                elif ( numParams < numExpts * 8 ):
+                    #print( str( round(numParams / numExpts) ), end = "", flush = True )
+                    print( ".", end = "", flush = True )
+                    paramHisto[ round( numParams / numExpts) ] += 1
+                else:
+                    print( "\nWarning: {} params from {} expts in pathway '{}' in block {}".format( numParams, numExpts, pname, idx+1 ) )
+                    tooFewExpts += 1
+    print( "\nnumParam/numExpt distrib = {}".format( paramHisto) )
+    print( "numPathways={}, numParam>{}={}, tooFewExpts = {}.".format( numPathways, maxSafeParams, tooManyParams, tooFewExpts ) )
+
+
 def main():
     t0 = time.time()
     parser = argparse.ArgumentParser( description = 
@@ -279,6 +305,9 @@ def main():
 
     ## Check 4: All named objects exist in the map file or model.
     checkModelObjectsExist( blocks, modelmap, objFields, modelMols )
+
+    ## Check 5: Num of Params should be small, esp wrt num of experiments.
+    warnTooManyParams( blocks, objFields )
 
 
         
