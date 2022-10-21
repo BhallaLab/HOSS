@@ -99,23 +99,7 @@ def validateConfig( args ):
     print( "Validated config file: ", args.config )
     return config, fsSchema 
 
-def main():
-    t0 = time.time()
-    parser = argparse.ArgumentParser( description = 
-            'This script does a sweep of tests to catch cases that may prevent an optimization from working. ')
-    parser.add_argument( 'config', type = str, help='Required: JSON configuration file for doing the optimization.')
-    parser.add_argument( '-m', '--model', type = str, help='Optional: Composite model definition file. First searched in directory "location", then in current directory.' )
-    parser.add_argument( '-map', '--map', type = str, help='Model entity mapping file. This is a JSON file.' )
-    parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files.', default = "./Expts" )
-    parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
-    parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
-    args = parser.parse_args()
-
-    ## Check 0: Load and validate the config file
-    config, fsSchema = validateConfig( args )
-
-
-    ## Check 0.1: Load and validate the map file. We'll use it later too.
+def validateMap( args, config ):
     if args.map == None:
         mapFileName = config["map"]
     else:
@@ -132,8 +116,9 @@ def main():
         print( "Error: Unable to find map file: " + mapFileName )
         quit()
     print( "Validated map file: ", mapFileName )
+    return modelmap
 
-    ## Check 0.2: Load and validate the model file. We'll use it later too.
+def validateModel( args, config ):
     if args.model == None:
         modelFileName = config["model"]
     else:
@@ -157,20 +142,21 @@ def main():
         print( "Error: Unable to find model file: " + modelFileName )
         quit()
     print( "Validated model file: ", modelFileName )
+    return model, modelMols, objFields
 
-    blocks = config["HOSS"]
+def validateHierarchyOrdering( blocks ):
     fail = False
-    ## Check 1: All hierarchyLevels are present, sequentially
     for idx, bb in enumerate( blocks ):
         hL = bb['hierarchyLevel']
         if hL != idx + 1:
-            print( "Error: expected block heirarchy {}, got {} for {}".format( idx+1, hl, bb['name'] ) )
+            print( "Error: expected block heirarchy {}, got {} for {}".format( idx+1, hL, bb['name'] ) )
             fail = True
     if fail: 
         quit()
     print( "Cleared test for sequential hierarchyLevel in blocks")
 
-    ## Check 2: All expt files are present and readable
+def checkForExperimentFiles( args, blocks ):
+    fail = False
     numExpts = 0
     for idx, bb in enumerate( blocks ):
         for pname, pblock in bb.items():
@@ -189,7 +175,8 @@ def main():
         quit()
     print( "\nFound all {} named experiment files.".format( numExpts ) )
 
-    ## Check 3: All expt files are well-formed JSON and pass the FindSim-Schema
+def validateExperimentFiles( args, blocks, fsSchema ):
+    fail = False
     numExpts = 0
     exptDefnDict = {}
     for idx, bb in enumerate( blocks ):
@@ -225,7 +212,8 @@ def main():
         quit()
     print( "\nValidated all {} named experiment files.".format( numExpts ) )
 
-    ## Check 4: All named objects exist in the map file.
+def checkModelObjectsExist( blocks, modelmap, objFields, modelMols ):
+    fail = False
     numParams = 0
     for idx, bb in enumerate( blocks ):
         for pname, pblock in bb.items():
@@ -254,6 +242,43 @@ def main():
         print( "\n" )
         quit()
     print( "\nValidated all {} parameters.".format( numParams ) )
+
+def main():
+    t0 = time.time()
+    parser = argparse.ArgumentParser( description = 
+            'This script does a sweep of tests to catch cases that may prevent an optimization from working. ')
+    parser.add_argument( 'config', type = str, help='Required: JSON configuration file for doing the optimization.')
+    parser.add_argument( '-m', '--model', type = str, help='Optional: Composite model definition file. First searched in directory "location", then in current directory.' )
+    parser.add_argument( '-map', '--map', type = str, help='Model entity mapping file. This is a JSON file.' )
+    parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files.', default = "./Expts" )
+    parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
+    parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
+    args = parser.parse_args()
+
+    ## Check 0: Load and validate the config file
+    config, fsSchema = validateConfig( args )
+
+
+    ## Check 0.1: Load and validate the map file. We'll use it later too.
+    modelmap = validateMap( args, config )
+
+    ## Check 0.2: Load and validate the model file. We'll use it later too.
+    model, modelMols, objFields = validateModel( args, config )
+
+
+    blocks = config["HOSS"]
+    ## Check 1: All hierarchyLevels are present, sequentially
+    validateHierarchyOrdering( blocks )
+
+
+    ## Check 2: All expt files are present and readable
+    checkForExperimentFiles( args, blocks )
+
+    ## Check 3: All expt files are well-formed JSON and pass FindSim-Schema
+    validateExperimentFiles( args, blocks, fsSchema )
+
+    ## Check 4: All named objects exist in the map file or model.
+    checkModelObjectsExist( blocks, modelmap, objFields, modelMols )
 
 
         
