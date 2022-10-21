@@ -67,6 +67,14 @@ def findHTmols( model ):
         ret.extend( [cc for cc in model["Constants"]] )
     return ret
 
+def findKKITmols( model ):
+    ret = []
+    for mm in model:
+        if mm[:9] == "simundump":
+            sp = mm.split( " " )
+            ret.append( sp[2].split( "/" )[-1] )
+    return ret
+
 def validateConfig( args ):
     try:
         with open( args.config ) as json_file:
@@ -119,6 +127,8 @@ def validateMap( args, config ):
     return modelmap
 
 def validateModel( args, config ):
+    model = None
+    modelMols = []
     if args.model == None:
         modelFileName = config["model"]
     else:
@@ -135,6 +145,10 @@ def validateModel( args, config ):
                     print( err )
                     quit()
                 objFields = HTobjFields
+            elif modelSuffix == "g":
+                model = model_file.read().splitlines()
+                objFields = ODEobjFields
+                modelMols = findKKITmols( model )
             else:
                 objFields = ODEobjFields
                 modelMols = []
