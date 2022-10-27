@@ -50,8 +50,8 @@ def logResult(result):
     # results is modified only by the main process, not the pool workers.
     results.append(result)
 
-def worker( fname, returnDict, scoreFunc, modelFile, mapFile, silent, solver  ):
-    score, elapsedTime, diagnostics = findSim.innerMain( fname, scoreFunc = scoreFunc, modelFile = modelFile, mapFile = mapFile, hidePlot = False, ignoreMissingObj = True, silent = silent, solver = solver )
+def worker( fname, returnDict, scoreFunc, modelFile, mapFile, silent, solver, plots ):
+    score, elapsedTime, diagnostics = findSim.innerMain( fname, scoreFunc = scoreFunc, modelFile = modelFile, mapFile = mapFile, hidePlot = False, ignoreMissingObj = True, silent = silent, solver = solver, plots = plots )
     returnDict[fname] = score
 
 def main():
@@ -63,6 +63,7 @@ def main():
     parser.add_argument( '-map', '--map', type = str, help='Optional: File name for alternative model mapfile.', default = "" )
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation.', default = "" ) 
     parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "gsl".', default = "gsl" )
+    parser.add_argument( '-p', '--plot', type = str, nargs = '*', help='Optional: Plot specified fields as time-series', default = "" )
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     args = parser.parse_args()
 
@@ -110,7 +111,7 @@ def main():
         jobs = []
         for f in val: # Iterate through each expt (tsv or json) fname
             fname = exptDir + "/" + f
-            p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = scoreFunc, modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = args.solver ) )
+            p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = scoreFunc, modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = args.solver, plots = args.plot ) )
             jobs.append(p)
             p.start()
         for proc in jobs:

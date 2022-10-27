@@ -46,6 +46,7 @@ import json
 import jsonschema
 import os
 import time
+import math
 from multiprocessing.pool import ThreadPool
 import multi_param_minimization
 
@@ -93,7 +94,7 @@ def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
         initScore, altScore = combineScores( eret )
         totAltScore += altScore
         totInitScore += initScore
-    if ( totScore - totAltScore > 1e-6 ):
+    if not math.isclose( totScore, totAltScore, rel_tol = 1e-3, abs_tol = 1e-6 ):
         print( "Warning: Score mismatch in processIntermediateResults: ", totScore, totAltScore )
     print( "Level {} ------- Init Score: {:.3f}   FinalScore {:.3f}       Time: {:.3f} s\n".format( levelIdx, totInitScore / len( retvec ), totAltScore / len( retvec ), t0 ) )
 
