@@ -350,20 +350,22 @@ def runOptFromJson( args ):
     with open( args.location ) as json_file:
         config = json.load( json_file )
     blocks = config["HOSS"]
-    basekeys = ["model", "map", "exptDir", "scoreFunc", "tolerance", "algorithm"]
-    baseargs = {"exptDir": "./", "tolerance": 1e-4, "show_ticker": args.show_ticker, "algorithm": args.algorithm, "solver": args.solver}
-    v = vars( args )
-    isCommandLine = {}
-    for key, val in config.items():
-        if key in basekeys:
+    #basekeys = ["model", "map", "exptDir", "scoreFunc", "tolerance", "algorithm"]
+    requiredDefaultArgs = {
+            "exptDir": "./Expts", 
+            "tolerance": 1e-3, 
+            "show_ticker": False,
+            "algorithm": "SLSQP",
+            "solver": "LSODA"
+        }
+    baseargs = vars( args )
+    for key, val in requiredDefaultArgs.items():
+        if baseargs[key]:   # Command line arg given.
+            continue
+        elif key in config: # defined in config file
+            baseargs[key] = config[key]
+        else:               # Use fallback.
             baseargs[key] = val
-            vk = v.get( key )
-            if vk:
-                #baseargs[key] = args[key]
-                baseargs[key] = vk
-                isCommandLine[key] = True
-            else:
-                isCommandLine[key] = False
     #if len( args.resultfile ) == 0 
     for hossLevel in blocks:
         if hossLevel["hierarchyLevel"] == 1:
@@ -371,12 +373,12 @@ def runOptFromJson( args ):
                 for key, val in hossLevel.items():
                     if key != "name" and key != "hierarchyLevel":
                         fn = fnames( baseargs, val, args )
-                        ret =  runJson( key, val, baseargs, isCommandLine, args.verbose )
+                        ret =  runJson( key, val, baseargs, args.verbose )
                         return ret + fn
                         #return ret + ( baseargs["model"], baseargs["map"] )
             elif args.optblock in hossLevel:
                 val = hossLevel[ args.optblock ]
-                ret = runJson( args.optblock, val, baseargs, isCommandLine, args.verbose )
+                ret = runJson( args.optblock, val, baseargs, args.verbose )
                 return ret + fnames( baseargs, val, args )
                 #return ret + ( baseargs["model"], baseargs["map"] )
             else:
@@ -384,20 +386,19 @@ def runOptFromJson( args ):
                 quit()
     
 
-def runJson( optName, optDict, args, isCommandLine, isVerbose = False ):
-    #print( "RJRJRJRJRJ..........", optName, "\n", "\n", args )
+def runJson( optName, optDict, args, isVerbose = False ):
     # The optDict is the individual pathway opt spec from the HOSS Json file
     paramArgs = [ i for i in optDict["params"] ]
     #paramArgs = [ i.encode( "ascii") for i in optDict["params"] ]
-    solver = args["solver"] # Should really be defined in expt.
+    solver = args["solver"]
     tolerance = args["tolerance"]
-    if (not isCommandLine["tolerance"]) and "tolerance" in optDict:
+    if "tolerance" in optDict:
         tolerance = optDict["tolerance"]    # Override for specific block
     algorithm = args["algorithm"]
-    if (not isCommandLine["algorithm"]) and "algorithm" in optDict:
+    if "algorithm" in optDict:
         algorithm = optDict["algorithm"]    # Override for specific block
     scoreFunc = args["scoreFunc"]
-    if (not isCommandLine["scoreFunc"]) and "scoreFunc" in optDict:
+    if "scoreFunc" in optDict:
         scoreFunc = optDict["scoreFunc"]    # Override for specific block
 
     ed = args["exptDir"] + "/"
@@ -405,7 +406,7 @@ def runJson( optName, optDict, args, isCommandLine, isVerbose = False ):
     #print( "{}".format( optDict["expt"] ))
     for key, val in optDict["expt"].items():
         sf = scoreFunc
-        if (not isCommandLine["scoreFunc"]) and "scoreFunc" in val:
+        if "scoreFunc" in val:
             sf = val["scoreFunc"]
         expts.append( (ed + key, val["weight"], sf ) )
         #print( "Expt {}   sf = {}".format( key, sf ) )

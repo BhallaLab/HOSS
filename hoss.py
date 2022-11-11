@@ -134,12 +134,12 @@ def main():
     parser.add_argument( '-b', '--blocks', nargs='*', default=[],  help='Blocks to execute within the JSON file. Defaults to empty, in which case all of them are executed. Each block is the string identifier for the block in the JSON file.' )
     parser.add_argument( '-m', '--model', type = str, help='Optional: Composite model definition file. First searched in directory "location", then in current directory.' )
     parser.add_argument( '-map', '--map', type = str, help='Model entity mapping file. This is a JSON file.' )
-    parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files.', default = "./Expts" )
+    parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files.' )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-p', '--parallel', type = str, help='Optional: Define parallelization model. Options: serial, MPI, threads. Defaults to serial. MPI not yet implemented', default = "serial" )
     parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation. Default: NRMS' )
-    parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "LSODA".', default = "LSODA" )
+    parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "LSODA".')
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     parser.add_argument( '-st', '--show_ticker', action="store_true", help="Flag: default False. Prints out ticker as optimization progresses.")
     args = parser.parse_args()
@@ -164,13 +164,28 @@ def main():
 
     blocks = config["HOSS"]
 
+    # We have a number of necessary option values.
+    # The order of priority is: command line, config file, pgm default
     # requiredDefaultArgs is set here in case neither the config file nor 
     # the command line has the argument. We can't use default args in 
     # argparser as this would override the config file.
-    #requiredDefaultArgs = { "tolerance": 0.001, "scoreFunc": "NRMS", "algorithm": "SLSQP", "solver": "LSODA" } 
-    #basekeys = ["model", "map", "exptDir", "scoreFunc", "tolerance"]
-    #basekeys = vars( args ).keys()
+    requiredDefaultArgs = { 
+            "tolerance": 0.001, 
+            "scoreFunc": "NRMS", 
+            "algorithm": "SLSQP", 
+            "solver": "LSODA", 
+            "exptDir": "./Expts" 
+        } 
     baseargs = vars( args )
+    for key, val in requiredDefaultArgs.items():
+        if baseargs[key]:   # command line arg given
+            continue
+        elif key in config: # Specified in Config file
+            baseargs[key] = config[key]
+        else:               # Fall back to default.
+            baseargs[key] = val
+
+    '''
     isCommandLine = {}
     for key, val in config.items():
         if key in baseargs:
@@ -180,8 +195,9 @@ def main():
                 isCommandLine[key] = False
             else:
                 isCommandLine[key] = True
-    #for key, val in baseargs.items():
-        #print( key, val )
+    for key, val in baseargs.items():
+        print( key, val )
+    '''
 
     # Build up optimization blocks. Within a block we assume that the
     # individual optimizations do not interact and hence can run in 
@@ -216,11 +232,11 @@ def main():
         # must be wrapped up before we go to the next level of heirarchy.
         t1 = time.time()
         if args.parallel == "serial":
-            score = runOptSerial( optBlock, baseargs, isCommandLine )
+            score = runOptSerial( optBlock, baseargs )
         elif args.parallel == "threads":
-            score = runOptThreads( optBlock, baseargs, isCommandLine )
+            score = runOptThreads( optBlock, baseargs )
         elif args.parallel == "MPI":
-            score = runOptMPI( optBlock, baseargs, isCommandLine )
+            score = runOptMPI( optBlock, baseargs )
         t2 = time.time()
         # This saves the scores and the intermediate opt file, to use for
         # next level of optimization.
@@ -231,17 +247,17 @@ def main():
         results.append( score )
     processFinalResults( results, baseargs, intermed, time.time() - t0  )
 
-def runOptSerial( optBlock, baseargs, isCommandLine ):
+def runOptSerial( optBlock, baseargs ):
     score = []
     for name, ob in optBlock.items():
-        score.append( multi_param_minimization.runJson(name, ob, baseargs, isCommandLine ) )
+        score.append( multi_param_minimization.runJson(name, ob, baseargs ) )
         initScore, optScore = combineScores (score[-1][1] )
         print( "OptSerial {:20s} Init={:.3f}     Opt={:.3f}     Time={:.3f}s".format(name, initScore, optScore, score[-1][2] ) )
         # optScore == score[-1][0].fun
 
     return score
 
-def runOptThreads( optBlock, baseargs, isCommandLine ):
+def runOptThreads( optBlock, baseargs ):
     score = []
     pool = ThreadPool( processes = len( optBlock ) )
     ret = [pool.apply_async( multi_param_minimization.runJson, args=( key, val, baseargs ) ) for key, val in  optBlock.items() ]
@@ -249,7 +265,7 @@ def runOptThreads( optBlock, baseargs, isCommandLine ):
 
     return score
 
-def runOptMPI( optBlock, baseargs, isCommandLine ):
+def runOptMPI( optBlock, baseargs ):
     score = []
     score.append( multi_param_minimization.runJson( itemName, item, baseargs ) )
 
