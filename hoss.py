@@ -41,6 +41,7 @@ but for clusters it may be necessary to also have a route through mpi4py.
 '''
 
 from __future__ import print_function
+import sys
 import argparse
 import json
 import jsonschema
@@ -82,7 +83,7 @@ def combineScores( eret ):
 
 
 def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
-    fp = open( baseargs["resultfile"], "w" )
+    fp = open( baseargs["resultFile"], "w" )
     optfile = baseargs["optfile"]
     #levelIdx = int(optfile[-6:-5]) # Assume we have only levels 0 to 9.
     totScore = 0.0
@@ -96,9 +97,10 @@ def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
         totInitScore += initScore
     if not math.isclose( totScore, totAltScore, rel_tol = 1e-3, abs_tol = 1e-6 ):
         print( "Warning: Score mismatch in processIntermediateResults: ", totScore, totAltScore )
-    print( "Level {} ------- Init Score: {:.3f}   FinalScore {:.3f}       Time: {:.3f} s\n".format( levelIdx, totInitScore / len( retvec ), totAltScore / len( retvec ), t0 ) )
+    if __name__ == "__main__":
+        print( "Level {} ------- Init Score: {:.3f}   FinalScore {:.3f}       Time: {:.3f} s\n".format( levelIdx, totInitScore / len( retvec ), totAltScore / len( retvec ), t0 ) )
 
-    fnames = { "model": baseargs["model"], "optfile": optfile, "map": baseargs["map"], "resultfile": baseargs["resultfile"] }
+    fnames = { "model": baseargs["model"], "optfile": optfile, "map": baseargs["map"], "resultFile": baseargs["resultFile"] }
     pargs = []
     rargs = []
     # Catenate all the changed params and values.
@@ -120,11 +122,12 @@ def processFinalResults( results, baseargs, intermed, t0 ):
     totAltScore = sum ( [ ii[1] for ii in intermed ] )
     numRet = sum ( [ ii[2] for ii in intermed ] )
     #print( "\nMultilevel optimization complete in {:.3f} s--- Mean Score = {:.3f} ".format( t0, totScore/numScore ) )
-    print( "\nMultilevel optimization:  Mean Init Score = {:.3f}, Final = {:.3f}, Time={:.3f}s".format( totInitScore/numRet, totAltScore/numRet, t0 ) )
+    if __name__ == "__main__":
+        print( "\nMultilevel optimization:  Mean Init Score = {:.3f}, Final = {:.3f}, Time={:.3f}s".format( totInitScore/numRet, totAltScore/numRet, t0 ) )
 
 ######################################
 
-def main():
+def main( args ):
     t0 = time.time()
     parser = argparse.ArgumentParser( description = 
             'This script orchestrates multilevel optimization, first over many individual pathways, then over the cross-talk between them, and possibly further levels.  It uses a JSON file for configuring the optimization.  Since the individual optimizations can go in parallel, the system spreads out the load into many individual multi-parameter optimization runs, which can be run in parallel.' )
@@ -137,12 +140,12 @@ def main():
     parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files.' )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-p', '--parallel', type = str, help='Optional: Define parallelization model. Options: serial, MPI, threads. Defaults to serial. MPI not yet implemented', default = "serial" )
-    parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
+    parser.add_argument( '-r', '--resultFile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation. Default: NRMS' )
     parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "LSODA".')
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     parser.add_argument( '-st', '--show_ticker', action="store_true", help="Flag: default False. Prints out ticker as optimization progresses.")
-    args = parser.parse_args()
+    args = parser.parse_args( args )
 
     # Load and validate the config file
     try:
@@ -174,7 +177,9 @@ def main():
             "scoreFunc": "NRMS", 
             "algorithm": "SLSQP", 
             "solver": "LSODA", 
-            "exptDir": "./Expts" 
+            "exptDir": "./Expts" ,
+            "model": "./Models/model.json",
+            "map": "./Maps/map.json",
         } 
     baseargs = vars( args )
     for key, val in requiredDefaultArgs.items():
@@ -204,10 +209,10 @@ def main():
     # parallel. Once a block is done its values are consolidated and used
     # for the next block.
     assert( 'model' in baseargs )
-    assert( 'resultfile' in baseargs )
+    assert( 'resultFile' in baseargs )
     origModel = baseargs['model'] # Use for loading model
     optModel = baseargs['optfile'] # Use for final model save
-    optResults = baseargs['resultfile'] # Use for final results
+    optResults = baseargs['resultFile'] # Use for final results
     modelFileSuffix = origModel.split( "." )[-1]
     results = []
     intermed = []
@@ -216,10 +221,14 @@ def main():
         hl = hossLevel["hierarchyLevel"]
         # Specify intermediate model and result files
         baseargs['optfile'] = "./_optModel{}.{}".format(hl, modelFileSuffix)
-        baseargs['resultfile'] = "./_optResults{}.txt".format( hl )
+        baseargs['resultFile'] = "./_optResults{}.txt".format( hl )
         for key, val in hossLevel.items():
             if key == "name" or key == "hierarchyLevel":
                 continue
+            if "optModelFile" in val:
+                baseargs['optfile'] = val["optModelFile"]
+            if "resultFile" in val:
+                baseargs['resultFile'] = val["resultFile"]
             # Either run all items or run named items in block.
             #print( "Args.blocks = ", args.blocks, "     Key = ", key )
             if args.blocks == [] or key in args.blocks:
@@ -252,7 +261,7 @@ def runOptSerial( optBlock, baseargs ):
     for name, ob in optBlock.items():
         score.append( multi_param_minimization.runJson(name, ob, baseargs ) )
         initScore, optScore = combineScores (score[-1][1] )
-        print( "OptSerial {:20s} Init={:.3f}     Opt={:.3f}     Time={:.3f}s".format(name, initScore, optScore, score[-1][2] ) )
+        #print( "OptSerial {:20s} Init={:.3f}     Opt={:.3f}     Time={:.3f}s".format(name, initScore, optScore, score[-1][2] ) )
         # optScore == score[-1][0].fun
 
     return score
@@ -273,4 +282,4 @@ def runOptMPI( optBlock, baseargs ):
         
 # Run the 'main' if this script is executed standalone.
 if __name__ == '__main__':
-    main()
+    main( sys.argv[1:] )

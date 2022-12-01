@@ -72,7 +72,11 @@ def findKKITmols( model ):
     for mm in model:
         if mm[:9] == "simundump":
             sp = mm.split( " " )
-            ret.append( sp[2].split( "/" )[-1] )
+            objName = sp[2].split( "/" )[-1]
+            objName = objName.replace( "*", "p" )
+            objName = objName.replace( "-", "_" )
+            objName = objName.replace( ".", "_" )
+            ret.append( objName )
     return ret
 
 def validateConfig( args ):
@@ -225,9 +229,44 @@ def validateExperimentFiles( args, blocks, fsSchema ):
         quit()
     print( "\nValidated all {} named experiment files.".format( numExpts ) )
 
+def checkMapObjPresentInModel( modelMols, modelmap ):
+    fail = False
+    newMapStr = "{"
+    comma = ""
+    for mapkey, mapList in modelmap.items():
+        good = 0
+        newMapList = ""
+        for mm in mapList:
+            mmTail = mm.split( '/' )[-1]
+            if mmTail in modelMols:
+                if newMapList == "":
+                    newMapList = '"{}"'.format( mm )
+                else:
+                    newMapList += ',"{}"'.format( mm )
+            else:
+                print( 'Model obj not found for map entry "{}":["{}"]'.format(  mapkey, mm  ) )
+                fail = True
+                good += 1
+        print( ".", end = "", flush=True)
+        if newMapList != "":
+            newMapStr += '{}\n\t"{}":[{}]'.format( comma, mapkey, newMapList)
+            comma = ","
+    if fail: 
+        print( "\n\n MapFile failed, wrote file 'cleanMap.json'\n" )
+        with open( "cleanMap.json", "w" ) as mapfile:
+            mapfile.write( newMapStr )
+            mapfile.write( "\n}\n" )
+        quit()
+    print( "\nValidated mapfile." )
+
+
 def checkModelObjectsExist( blocks, modelmap, objFields, modelMols ):
     fail = False
     numParams = 0
+    newMapStr = "{"
+    comma = ""
+    # Set up a set of already defined objects
+    objSet = set()
     for idx, bb in enumerate( blocks ):
         for pname, pblock in bb.items():
             if not pname in ["name", "hierarchyLevel"]:
@@ -244,15 +283,32 @@ def checkModelObjectsExist( blocks, modelmap, objFields, modelMols ):
                         print( "\nError: Unknown field name: '{}' on obj '{}' in pathway '{}' in block {}".format( field, obj, pname, idx+1 ) )
                         fail = True
                         ok = False
+                    if obj in objSet:
+                        continue
+                    objSet.add( obj )
                     if (obj in modelmap) or (obj in modelMols):
                         if ok:
                             print( ".", end = "", flush=True)
+                            if obj in modelmap:
+                                newMapStr += '{}\n\t"{}":['.format( comma, obj, modelmap[obj] )
+                                comma = ","
+                                comma2 = ""
+                                for mm in modelmap[obj]:
+                                    newMapStr += '{}"{}"'.format( comma2, obj, modelmap[obj] )
+                                    comma2 = ","
+                                newMapStr += ']'
+                            # Don't put in entry if obj already matches a name in modelMols.
                             numParams += 1
                     else:
                         print( "\nError: Missing Obj name in mapfile: '{}' in pathway '{}' in block {}".format( obj, pname, idx+1 ) )
+                        newMapStr += '{}\n\t"{}":["{}"]'.format( comma, obj, obj)
+                        comma = ","
                         fail = True
     if fail: 
-        print( "\n" )
+        print( '\nFailed to validate model objects, dumped suggestion mapfile "cleanmap2.json"' )
+        with open( "cleanMap2.json", "w" ) as mapfile:
+            mapfile.write( newMapStr )
+            mapfile.write( "\n}\n" )
         quit()
     print( "\nValidated all {} parameters.".format( numParams ) )
 
@@ -305,6 +361,8 @@ def main():
     ## Check 0.2: Load and validate the model file. We'll use it later too.
     model, modelMols, objFields = validateModel( args, config )
 
+    ## Check 0.3: Check that entities mentioned in mapfile exist in model.
+    checkMapObjPresentInModel( modelMols, modelmap )
 
     blocks = config["HOSS"]
     ## Check 1: All hierarchyLevels are present, sequentially
