@@ -92,6 +92,7 @@ def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
     for (results, eret, optTime, paramArgs) in retvec:
         multi_param_minimization.analyzeResults( fp, True, results, paramArgs, eret, optTime, baseargs["scoreFunc"], verbose = False ) # Last arg is 'verbose'
         totScore += results.fun
+        #print( "in processIntermediateResults" )
         initScore, altScore = combineScores( eret )
         totAltScore += altScore
         totInitScore += initScore
@@ -121,9 +122,9 @@ def processFinalResults( results, baseargs, intermed, t0 ):
     totInitScore = sum( [ ii[0] for ii in intermed ] )
     totAltScore = sum ( [ ii[1] for ii in intermed ] )
     numRet = sum ( [ ii[2] for ii in intermed ] )
-    #print( "\nMultilevel optimization complete in {:.3f} s--- Mean Score = {:.3f} ".format( t0, totScore/numScore ) )
-    if __name__ == "__main__":
-        print( "\nMultilevel optimization:  Mean Init Score = {:.3f}, Final = {:.3f}, Time={:.3f}s".format( totInitScore/numRet, totAltScore/numRet, t0 ) )
+    #print( "Multilevel optimization complete in {:.3f} s--- Mean Score = {:.3f} ".format( t0, totScore/numScore ) )
+    #if __name__ == "__main__":
+    print( "{}: HOSS opt: Init Score = {:.3f}, Final = {:.3f}, Time={:.3f}s".format( baseargs['optfile'], totInitScore/numRet, totAltScore/numRet, t0 ))
 
 ######################################
 
@@ -260,6 +261,7 @@ def runOptSerial( optBlock, baseargs ):
     score = []
     for name, ob in optBlock.items():
         score.append( multi_param_minimization.runJson(name, ob, baseargs ) )
+        #print( "in runOptSerial" )
         initScore, optScore = combineScores (score[-1][1] )
         #print( "OptSerial {:20s} Init={:.3f}     Opt={:.3f}     Time={:.3f}s".format(name, initScore, optScore, score[-1][2] ) )
         # optScore == score[-1][0].fun
