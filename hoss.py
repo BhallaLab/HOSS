@@ -48,7 +48,7 @@ import jsonschema
 import os
 import time
 import math
-from multiprocessing.pool import ThreadPool
+import multiprocessing
 import multi_param_minimization
 
 ScorePow = 2.0
@@ -141,6 +141,7 @@ def main( args ):
     parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files.' )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-p', '--parallel', type = str, help='Optional: Define parallelization model. Options: serial, MPI, threads. Defaults to serial. MPI not yet implemented', default = "serial" )
+    parser.add_argument( '-n', '--numProcesses', type = int, help='Optional: Number of blocks to run in parallel, when we are not in serial mode. Note that each block may have multiple experiments also running in parallel. Default is to take numCores/8.', default = 0 )
     parser.add_argument( '-r', '--resultFile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation. Default: NRMS' )
     parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "LSODA".')
@@ -260,27 +261,46 @@ def main( args ):
 def runOptSerial( optBlock, baseargs ):
     score = []
     for name, ob in optBlock.items():
+        #print( "\n", name, ob, "\n###########################################" )
         score.append( multi_param_minimization.runJson(name, ob, baseargs ) )
         #print( "in runOptSerial" )
         initScore, optScore = combineScores (score[-1][1] )
         #print( "OptSerial {:20s} Init={:.3f}     Opt={:.3f}     Time={:.3f}s".format(name, initScore, optScore, score[-1][2] ) )
         # optScore == score[-1][0].fun
 
+    #print( "Serial SCORE = ", [ss[0].fun for ss in score] )
     return score
 
-def runOptThreads( optBlock, baseargs ):
-    score = []
-    pool = ThreadPool( processes = len( optBlock ) )
-    ret = [pool.apply_async( multi_param_minimization.runJson, args=( key, val, baseargs ) ) for key, val in  optBlock.items() ]
-    score.append( multi_param_minimization.runJson( itemName, item, baseargs ) )
+def ticker( arg ):
+    return
 
+def threadProc( name, ob, baseargs ):
+    currProc = multiprocessing.current_process()
+    currProc.daemon = False  # This allows nested multiprocessing.
+    #print( "\n", name, ob, "\n###########################################" )
+    return multi_param_minimization.runJson(name, ob, baseargs )
+
+def runOptThreads( optBlock, baseargs ):
+    numProcesses = baseargs["numProcesses"]
+    if numProcesses == 0:
+        numProcesses = multiprocessing.cpu_count() // 8 # Assume 8 expts per opt
+    if numProcesses == 0:
+        numProcesses = 1
+    numProcesses = min( numProcesses, len(optBlock) )
+
+    pool = multiprocessing.Pool( processes = numProcesses )
+    score = []
+    ret = []
+    for name, ob in optBlock.items():
+        ret.append( pool.apply_async( threadProc, args = ( name, ob, baseargs ), callback = ticker ) )
+    score = [rr.get() for rr in ret ]
+
+    #print( "Thread SCORE = ", [ss[0].fun for ss in score] )
     return score
 
 def runOptMPI( optBlock, baseargs ):
-    score = []
-    score.append( multi_param_minimization.runJson( itemName, item, baseargs ) )
-
-    return score
+    print( "MPI version not yet implemented, using serial version")
+    return runOptSerial( optBlock, baseargs )
         
 # Run the 'main' if this script is executed standalone.
 if __name__ == '__main__':
