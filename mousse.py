@@ -243,6 +243,7 @@ def main():
     parser.add_argument( "-m", "--model", type = str, help = "Optional: Filepath for chemical kinetic model in HillTau or SBML format. If model is not provided the synthetic file just has zeros for predicted output." )
     parser.add_argument( "-t", "--tau", type = float, help = "Optional: tau for reaction settling, overrides estimate from model if available. Default = 300 seconds." )
     parser.add_argument( '-f', '--findSimFile', type = str, help='Optional: Base name of FindSim output file, which will be of form <file>_TS_<output>_vs__<input>.json for TimeSeries outputs, and <file>_DR_<output>_vs_<input>.json for the dose-responses. Default = "synth"', default = "synth", metavar = "experiment_file_name" )
+    parser.add_argument( '-d', '--dir', type = str, help='Optional: Directory in which to put the output files. If it does not exist it is created. Default is current directory', metavar = "output_directory" )
     parser.add_argument( '-p', '--pairwise', action='store_true', help='Flag: when set, generate all pairwise Input combinations as well for TS and DR')
     args = parser.parse_args()
 
@@ -282,8 +283,20 @@ def main():
         else: 
 
             referenceOutputs = { rr:np.zeros(1+int(tau*3/plotDt)) for rr in args.readouts }
+
+        if args.dir == None:
+            fname = args.findSimFile
+        else:
+            if not os.path.exists(args.dir):
+                os.makedirs(args.dir)
+            elif not os.path.isdir(args.dir):
+                print( "Error: Specified path is not a dir. Quitting." )
+                quit()
+
+            fname = args.dir + "/" + args.findSimFile
+
         for key, val in referenceOutputs.items():
-            generateExperiment( args.findSimFile, stimVec, key, val )
+            generateExperiment( fname, stimVec, key, val )
 
 if __name__ == '__main__':
     main()
