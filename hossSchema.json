@@ -7,6 +7,7 @@
 		"model": {"type": "string"},
 		"map": {"type": "string"},
 		"exptDir": {"type": "string"},
+		"outputDir": {"type": "string"},
 		"scoreFunc": {"type": "string"},
 		"tolerance": {"type": "number"},
 		"algorithm": {"type": "string"},
