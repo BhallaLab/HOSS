@@ -51,17 +51,18 @@ numEval = 0
 numIter = 0
 plotDt = 1
 stimVec = [[0, 0.0, 20.0], [0, 1e-3, 40.0], [0, 0, 40.0]]
-stimRange = [ 0.1, 0.2, 0.5, 1, 2.0, 5.0, 10.0 ]
+stimRange = [ 0.05, 0.1, 0.2, 0.4, 0.8, 1, 1.25, 2.5, 5.0, 10.0, 20.0 ]
 settleTimeScale = stimRange[-1]  # How much longer is settleTime than midTime?
 
 class Stim:
     ### Advance to specified time, and then set the conc to the stim value.
-    def __init__( self, mol, conc, time ):
+    def __init__( self, mol, conc, time, doSettle = False ):
         self.molName = mol
         self.mooseMol = getMooseName( mol )
         self.hillTauMol = getHillTauName( mol )
         self.conc = conc
         self.time = time
+        self.doSettle = doSettle
         self.molIndex = 0
 
 
@@ -75,22 +76,43 @@ def runHillTau( model, stimVec, outMols ):
                 i.conc = mi.concInit
         else:
             raise ValueError( "Nonexistent stimulus molecule: ", i.hillTauMol )
+        si = model.reacInfo.get( i.hillTauMol )
+        if si:
+            si.isBuffered = 1
+
     outMolIndex = {}
+    ret = {}
     for i in outMols:
         mi = model.molInfo.get( i )
         if mi:
             outMolIndex[i] = mi.index
+            ret[i] = []
         else:
             raise ValueError( "Nonexistent output molecule: ", i )
     model.reinit()
     lastt = 0.0
+    mi = model.molInfo[outMols[0]]
     for stim in stimVec:
-        model.advance( stim.time - lastt )
         model.conc[ stim.molIndex ] = stim.conc
+        model.advance( stim.time - lastt, stim.doSettle )
+        #print( "ADVANCE ", stim.time - lastt, stim.conc, stim.doSettle )
         lastt = stim.time
+        #print( "[{}].conc = {}".format( mi.name, model.conc[mi.index] ) )
+        if stim.doSettle:   # Handling dose-response.
+            for key, value in outMolIndex.items():
+                ret[key].append( model.conc[value] )
     #nt = np.transpose( np.array( self.model.plotvec ) )
     #ret = { name:nt[index] for name, index in self.plotnum.items() }
-    ret = { name:np.array(model.getConcVec( index )) for name, index in outMolIndex.items() }
+    # OK< getting the conc vec is failing.
+    if not stim.doSettle:
+        ret = { name:np.array(model.getConcVec( index )) for name, index in outMolIndex.items() }
+
+    # Unbuffer the reacs
+    for i in stimVec:
+        si = model.reacInfo.get( i.hillTauMol )
+        if si:
+            si.isBuffered = 0
+
     return ret
 
 def runMoose( chem, stimVec, outMols ):
@@ -146,7 +168,7 @@ def parseDoser( stimVec, d, t ):
     stimVec.append( Stim( mol, 0.0, t ) )
     t += settleTime
     for x in stimRange: 
-        stimVec.append( Stim( mol, midconc * x, t ) )
+        stimVec.append( Stim( mol, midconc * x, t, doSettle = True ) )
         t += settleTime
     stimVec.append( Stim( mol, 0.0, t ) ) 
     t += settleTime
@@ -203,16 +225,21 @@ def estimateTau( htmodel, readoutMol ):
 
 
 def generateStimData( stimVec ):
+    # runHillTau specifies the time of the end of the stimulus, but here
+    # we have to specify the time of the start. So we subtract out the
+    # first time entry as they are all offset by this.
+    startt = stimVec[0].time
     ret = []
     for i in stimVec:
-        ret.append( [i.time, i.conc * 1000] )
+        ret.append( [np.round( i.time - startt, decimals = 3 ), i.conc * 1000] )
     return ret
 
 def generateReadoutData( plotDt, refVals ):
-    ret = [ [ ii*plotDt, rr*1000, 0.0] for ii, rr in enumerate( refVals ) ]
+    #ret = [ [ np.round( ss.time, decimals = 3 ), rr*1000, 0.0] for ss, rr in zip( stimVec, refVals ) ]
+    ret = [ [ np.round( plotDt * ii, decimals = 3 ), rr*1000, 0.0] for ii, rr in enumerate( refVals ) ]
     return ret
 
-def generateExperiment( fname, stimVec, refMol, refVals ):
+def generateTimeExperiment( fname, stimVec, refMol, refVals ):
     fname = "{}_TS_{}_vs_{}.json".format(fname, refMol, stimVec[0].molName)
     transcriber = getpass.getuser()
     jsonDict = { 
@@ -228,8 +255,53 @@ def generateExperiment( fname, stimVec, refMol, refVals ):
                 "entities": [refMol],
                 "field": "conc",
                 "data": generateReadoutData( plotDt, refVals )
-                }
+            },
+            "Modifications": {
+                "parameterChange": [
+                    {
+                        "entity": stimVec[0].molName,
+                        "field": "isBuffered",
+                        "value": 1,
+                        "units": "none"
+                    }
+                ]
             }
+        }
+    with open( fname, "w" ) as fd:
+        json.dump( jsonDict, fd, indent = 4 )
+
+def generateDoseExperiment( fname, stimVec, refMol, refVals, settleTime ):
+    fname = "{}_DR_{}_vs_{}.json".format(fname, refMol, stimVec[0].molName)
+    transcriber = getpass.getuser()
+    jsonDict = { 
+            "FileType": "FindSim",
+            "Version": "1.0",
+            "Metadata": 
+            {"transcriber": transcriber, "organization": "OpenSource", 
+                "source": {"sourceType": "other", "doi": "dummy", "year":datetime.datetime.now().year}
+            },
+            "Experiment": { "design": "DoseResponse", "species":"", "cellType": "", "notes": "Generated from mousse.py" },
+            "Stimuli": [{ "timeUnits": "sec", "quantityUnits": "uM", 
+                "entity": stimVec[0].molName, "field": "conc"
+                #, "isBuffered": 1
+            },],
+            "Readouts": { "timeUnits": "sec", "quantityUnits":"uM",
+                "settleTime": np.round( settleTime, decimals = 2 ),
+                "entities": [refMol],
+                "field": "conc",
+                "data": [ [ss.conc * 1000, rr*1000, 0.0] for ss, rr in zip( stimVec, refVals ) ]
+            },
+            "Modifications": {
+                "parameterChange": [
+                    {
+                        "entity": stimVec[0].molName,
+                        "field": "isBuffered",
+                        "value": 1,
+                        "units": "none"
+                    }
+                ]
+            }
+        }
     with open( fname, "w" ) as fd:
         json.dump( jsonDict, fd, indent = 4 )
             
@@ -266,37 +338,46 @@ def main():
     else:
         tau = args.tau
     plotDt = tau * 3 / 24
+    settleTime = tau * 2
 
     if htmodel:
         htmodel.dt = plotDt
 
+    if args.dir == None:
+        fname = args.findSimFile
+    else:
+        if not os.path.exists(args.dir):
+            os.makedirs(args.dir)
+        elif not os.path.isdir(args.dir):
+            print( "Error: Specified path is not a dir. Quitting." )
+            quit()
+        fname = args.dir + "/" + args.findSimFile
 
+    msr = stimRange[-2]
     for ii in args.stimuli:
         # Build the timeseries first
-        stimVec = [ Stim( ii, 0, 0.0 ), 
-                Stim( ii, findMaxConc(htmodel, ii), tau ),
-                Stim( ii, 0, tau * 2 ),
-                Stim( ii, 0, tau * 3 )
+        maxConc = findMaxConc(htmodel, ii)
+        stimVec = [ 
+                Stim( ii, 0, tau),
+                Stim( ii, maxConc, tau * 2),
+                Stim( ii, 0, tau * 3)
                 ]
+        #stimVec.extend( [ Stim( ii, maxConc, tau + (1+jj)*tau/12 ) for jj in range(12) ]  )
+        #stimVec.append( Stim( ii, 0, tau * 3 ) )
+        doseVec = [ Stim( ii, maxConc * conc/msr, (settleTime + 1) * (1+jj), doSettle = True ) for jj, conc in enumerate( stimRange ) ]
         if args.model != None:
+            htmodel.dt = plotDt
             referenceOutputs = runHillTau( htmodel, stimVec, args.readouts )
+            htmodel.dt = settleTime
+            doserOutputs = runHillTau( htmodel, doseVec, args.readouts )
         else: 
-
             referenceOutputs = { rr:np.zeros(1+int(tau*3/plotDt)) for rr in args.readouts }
-
-        if args.dir == None:
-            fname = args.findSimFile
-        else:
-            if not os.path.exists(args.dir):
-                os.makedirs(args.dir)
-            elif not os.path.isdir(args.dir):
-                print( "Error: Specified path is not a dir. Quitting." )
-                quit()
-
-            fname = args.dir + "/" + args.findSimFile
+            doserOutputs = { rr:np.zeros(len(stimRange)) for rr in args.readouts }
 
         for key, val in referenceOutputs.items():
-            generateExperiment( fname, stimVec, key, val )
+            generateTimeExperiment( fname, stimVec, key, val )
+        for key, val in doserOutputs.items():
+            generateDoseExperiment( fname, doseVec, key, val, settleTime )
 
 if __name__ == '__main__':
     main()
