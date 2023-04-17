@@ -214,9 +214,11 @@ def findMaxConc( htmodel, stimMol ):
             raise ValueError( "Nonexistent stimulus molecule: ", stimMol )
     return 1.0
 
-def estimateTau( htmodel, readoutMol ):
+def estimateTau( htmodel, reacStims ):
     if htmodel:
-        ri = htmodel.reacInfo.get( readoutMol )
+        for name, readouts in reacStims.items():
+            ri = htmodel.reacInfo.get( readouts[0] )
+            break
         if ri:
             return ri.tau * 2.0 # Give the reac enough time to settle.
         else:
@@ -310,8 +312,9 @@ def main():
     global plotDt
     stimDict = {}
     parser = argparse.ArgumentParser( description = "MOUSSE: Model Optimizer Using Synthetic Signaling Experiments. Generates FindSim format experiment definitions for time-series and dose-responses for each input/output combination, and optionally pairwise multi-input combinations." )
-    parser.add_argument( "-s", "--stimuli", type = str, nargs = '+', metavar = "molName", help = "Required: Molecules to stimulate, as a list of space-separated names.")
-    parser.add_argument( "-r", "--readouts", type = str, nargs = '+', metavar = "molName", help = "Required: Readout molecules to monitor, as a list of space-separated names." )
+    parser.add_argument( '-a', '--allReacs', action='store_true', help='Flag: when set, generate all possible stimulus-readout pairs by scanning through all reactions.')
+    parser.add_argument( "-s", "--stimuli", type = str, nargs = '+', metavar = "molName", help = "Optional: Molecules to stimulate, as a list of space-separated names.", default = [])
+    parser.add_argument( "-r", "--readouts", type = str, nargs = '+', metavar = "molName", help = "Optional: Readout molecules to monitor, as a list of space-separated names.", default = [] )
     parser.add_argument( "-m", "--model", type = str, help = "Optional: Filepath for chemical kinetic model in HillTau or SBML format. If model is not provided the synthetic file just has zeros for predicted output." )
     parser.add_argument( "-t", "--tau", type = float, help = "Optional: tau for reaction settling, overrides estimate from model if available. Default = 300 seconds." )
     parser.add_argument( '-f', '--findSimFile', type = str, help='Optional: Base name of FindSim output file, which will be of form <file>_TS_<output>_vs__<input>.json for TimeSeries outputs, and <file>_DR_<output>_vs_<input>.json for the dose-responses. Default = "synth"', default = "synth", metavar = "experiment_file_name" )
@@ -319,22 +322,42 @@ def main():
     parser.add_argument( '-p', '--pairwise', action='store_true', help='Flag: when set, generate all pairwise Input combinations as well for TS and DR')
     args = parser.parse_args()
 
-    if args.stimuli == None:
-        print( "Error: At least one stimulus molecule must be defined." )
-        quit()
-    if args.readouts == None:
-        print( "Error: At least one readout molecule must be defined." )
-        quit()
+
+    reacStims = {}
+    for ss in args.stimuli:
+        rs = reacStims.get( ss )
+        if rs:
+            rs.extend( args.readouts )
+        elif len( args.readouts ) > 0:
+            reacStims[ss] = args.readouts
 
     if args.model:
         jsonDict = hillTau.loadHillTau( args.model )
         hillTau.scaleDict( jsonDict, hillTau.getQuantityScale( jsonDict ) )
         htmodel = hillTau.parseModel( jsonDict )
     else:
+        if args.allReacs:
+            print( "Error: Must define model to use --allReacs option" )
+            quit()
         htmodel = None
 
+    if args.allReacs:
+        for rr, val in htmodel.reacInfo.items():
+            subs = np.unique(val.subs )
+            for ss in subs:
+                rs = reacStims.get( ss )
+                if rs:
+                    rs.append( rr )
+                else:
+                    reacStims[ss] = [rr]
+
+    if len(reacStims) == 0:
+        print( "Error: No stimulus-readout pairs found. Terminating" )
+        quit()
+
+
     if args.tau == None: # Use the model tau estimate
-        tau = estimateTau( htmodel, args.readouts[0] )
+        tau = estimateTau( htmodel, reacStims )
     else:
         tau = args.tau
     plotDt = tau * 3 / 24
@@ -354,25 +377,28 @@ def main():
         fname = args.dir + "/" + args.findSimFile
 
     msr = stimRange[-2]
-    for ii in args.stimuli:
+
+    # Replace this with the reacStims dict
+    for ss, rlist in reacStims.items():
+        # Note ss is a name, and rlistl is a list of names.
         # Build the timeseries first
-        maxConc = findMaxConc(htmodel, ii)
+        maxConc = findMaxConc(htmodel, ss )
         stimVec = [ 
-                Stim( ii, 0, tau),
-                Stim( ii, maxConc, tau * 2),
-                Stim( ii, 0, tau * 3)
+                Stim( ss, 0, tau),
+                Stim( ss, maxConc, tau * 2),
+                Stim( ss, 0, tau * 3)
                 ]
         #stimVec.extend( [ Stim( ii, maxConc, tau + (1+jj)*tau/12 ) for jj in range(12) ]  )
         #stimVec.append( Stim( ii, 0, tau * 3 ) )
-        doseVec = [ Stim( ii, maxConc * conc/msr, (settleTime + 1) * (1+jj), doSettle = True ) for jj, conc in enumerate( stimRange ) ]
+        doseVec = [ Stim( ss, maxConc * conc/msr, (settleTime + 1) * (1+jj), doSettle = True ) for jj, conc in enumerate( stimRange ) ]
         if args.model != None:
             htmodel.dt = plotDt
-            referenceOutputs = runHillTau( htmodel, stimVec, args.readouts )
+            referenceOutputs = runHillTau( htmodel, stimVec, rlist )
             htmodel.dt = settleTime
-            doserOutputs = runHillTau( htmodel, doseVec, args.readouts )
+            doserOutputs = runHillTau( htmodel, doseVec, rlist )
         else: 
-            referenceOutputs = { rr:np.zeros(1+int(tau*3/plotDt)) for rr in args.readouts }
-            doserOutputs = { rr:np.zeros(len(stimRange)) for rr in args.readouts }
+            referenceOutputs = { rr:np.zeros(1+int(tau*3/plotDt)) for rr in rlist }
+            doserOutputs = { rr:np.zeros(len(stimRange)) for rr in rlist }
 
         for key, val in referenceOutputs.items():
             generateTimeExperiment( fname, stimVec, key, val )
