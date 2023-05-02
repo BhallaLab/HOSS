@@ -17,8 +17,8 @@
 
 '''
 *******************************************************************
- * File:            mousse.py
- * Description:     Model Optimizer Using Synthetic Signaling Experiments
+ * File:            mouse.py
+ * Description:     Model Optimizer Using Synthetic signaling Experiments
  * Author:          Upinder S. Bhalla
  * E-mail:          bhalla@ncbs.res.in
  ********************************************************************/
@@ -241,7 +241,47 @@ def generateReadoutData( plotDt, refVals ):
     ret = [ [ np.round( plotDt * ii, decimals = 3 ), rr*1000, 0.0] for ii, rr in enumerate( refVals ) ]
     return ret
 
-def generateTimeExperiment( fname, stimVec, refMol, refVals ):
+def generateInputBaseline( model, stimName, reacName ):
+    # Assumes HT model. Returns dict of nonzero baseline mol names, vals.
+    # Returns string with inputBaseline entry.
+    if model == None:
+        return []
+    reac = model.reacInfo.get( reacName )
+    assert( reac )
+    # I need to check if the stimulus is one of the substrates. If not,
+    # then I can't assign a buffered baseline to other inputs, since the 
+    # input may come through the same other inputs.
+    if not stimName in reac.subs:
+        return []
+
+    ret = []
+    # The set conversion gives me unique substrates.
+    for sub in [ ss for ss in set(reac.subs) if ss != stimName ]:
+        val = model.reacInfo.get( sub )
+        if val:
+            if val.baseline > 0.0:
+                ret.extend( [
+                        {
+                            "entity": sub,
+                            "field": "isBuffered",
+                            "value": 1,
+                            "units": "none"
+                        },
+                        {
+                            "entity": sub,
+                            "field": "concInit",
+                            "value": val.baseline,
+                            "units": "mM"
+                        }
+                    ]
+                )
+    '''
+    if len( ret ) > 0:
+        print( "Ret = \n", ret, "\n#############################" )
+    '''
+    return ret
+
+def generateTimeExperiment( fname, stimVec, refMol, refVals, baselineList ):
     fname = "{}_TS_{}_vs_{}.json".format(fname, refMol, stimVec[0].molName)
     transcriber = getpass.getuser()
     jsonDict = { 
@@ -269,10 +309,11 @@ def generateTimeExperiment( fname, stimVec, refMol, refVals ):
                 ]
             }
         }
+    jsonDict["Modifications"]["parameterChange"].extend( baselineList )
     with open( fname, "w" ) as fd:
         json.dump( jsonDict, fd, indent = 4 )
 
-def generateDoseExperiment( fname, stimVec, refMol, refVals, settleTime ):
+def generateDoseExperiment( fname, stimVec, refMol, refVals, settleTime, baselineList ):
     fname = "{}_DR_{}_vs_{}.json".format(fname, refMol, stimVec[0].molName)
     transcriber = getpass.getuser()
     jsonDict = { 
@@ -304,6 +345,7 @@ def generateDoseExperiment( fname, stimVec, refMol, refVals, settleTime ):
                 ]
             }
         }
+    jsonDict["Modifications"]["parameterChange"].extend( baselineList )
     with open( fname, "w" ) as fd:
         json.dump( jsonDict, fd, indent = 4 )
             
@@ -311,8 +353,8 @@ def generateDoseExperiment( fname, stimVec, refMol, refVals, settleTime ):
 def main():
     global plotDt
     stimDict = {}
-    parser = argparse.ArgumentParser( description = "MOUSSE: Model Optimizer Using Synthetic Signaling Experiments. Generates FindSim format experiment definitions for time-series and dose-responses for each input/output combination, and optionally pairwise multi-input combinations." )
-    parser.add_argument( '-a', '--allReacs', action='store_true', help='Flag: when set, generate all possible stimulus-readout pairs by scanning through all reactions.')
+    parser = argparse.ArgumentParser( description = "MOUSE: Model Optimizer Using Synthetic signaling Experiments. Generates FindSim format experiment definitions for time-series and dose-responses for each input/output combination, and optionally pairwise multi-input combinations." )
+    parser.add_argument( '-a', '--allReacs', action='store_true', help='Flag: when set, generate all possible 1-step stimulus-readout pairs by scanning through all reactions.')
     parser.add_argument( "-s", "--stimuli", type = str, nargs = '+', metavar = "molName", help = "Optional: Molecules to stimulate, as a list of space-separated names.", default = [])
     parser.add_argument( "-r", "--readouts", type = str, nargs = '+', metavar = "molName", help = "Optional: Readout molecules to monitor, as a list of space-separated names.", default = [] )
     parser.add_argument( "-m", "--model", type = str, help = "Optional: Filepath for chemical kinetic model in HillTau or SBML format. If model is not provided the synthetic file just has zeros for predicted output." )
@@ -380,7 +422,7 @@ def main():
 
     # Replace this with the reacStims dict
     for ss, rlist in reacStims.items():
-        # Note ss is a name, and rlistl is a list of names.
+        # Note ss is a name, and rlist is a list of names.
         # Build the timeseries first
         maxConc = findMaxConc(htmodel, ss )
         stimVec = [ 
@@ -401,9 +443,11 @@ def main():
             doserOutputs = { rr:np.zeros(len(stimRange)) for rr in rlist }
 
         for key, val in referenceOutputs.items():
-            generateTimeExperiment( fname, stimVec, key, val )
+            baselineDict = generateInputBaseline( htmodel, ss, key )
+            generateTimeExperiment( fname, stimVec, key, val, baselineDict )
         for key, val in doserOutputs.items():
-            generateDoseExperiment( fname, doseVec, key, val, settleTime )
+            baselineDict = generateInputBaseline( htmodel, ss, key )
+            generateDoseExperiment( fname, doseVec, key, val, settleTime, baselineDict )
 
 if __name__ == '__main__':
     main()
