@@ -197,22 +197,37 @@ def generateStimEntries( stimVec ):
         ret.append( {"timeUnits": "sec", "quantityUnits": "uM", "entity": name, "field": "conc", "data": generateStimData(val) } )
     return ret
 
-def findMaxConc( htmodel, stimMol ):
-    if htmodel:
-        mi = htmodel.molInfo.get( stimMol )
-        if mi:
-            conc = mi.concInit
-            if conc == 0:
-                # Try basename if it starts with an 'a' or a 'p'
-                tryname = stimMol[1:]
-                mi = htmodel.molInfo.get( tryname )
-                if mi:
-                    return mi.concInit
-            else:
-                return mi.concInit
-        else:
-            raise ValueError( "Nonexistent stimulus molecule: ", stimMol )
-    return 1.0
+def estimateStimConc( htmodel, stimMol ):
+    ret = -1.0
+    mi = htmodel.molInfo.get( stimMol )
+    stimMolIdx = mi.index
+    if mi:
+        ret = mi.concInit
+        if ret == 0:
+            # Try basename if it starts with an 'a' or a 'p'
+            tryname = stimMol[1:]
+            mi = htmodel.molInfo.get( tryname )
+            if mi:
+                ret = mi.concInit
+    else:
+        raise ValueError( "Nonexistent stimulus molecule: ", stimMol )
+
+    for name, rr in htmodel.reacInfo.items():
+        # Order of subs is [Reag, [modifier], ligand], or [Reag, [Reag...]
+        # In either a ligand or a single reag case, we use KA.
+        ligandIndex = htmodel.molInfo[ rr.subs[-1] ].index
+        if ligandIndex == stimMolIdx:
+            ret = max( ret, rr.KA )
+        elif len( rr.subs ) > 2 and rr.subs[1] == stimMol:
+            # If that didn't work, we could have second arg as a modifier.
+            # In this case we use Kmod
+            #print( "Using Kmod for ", stimMol, ", = ", rr.Kmod, ret )
+            ret = max( ret, rr.Kmod )
+
+    if ret <= 0:
+        print( "Warning, failed to find estimate for stimulus max for {}, using 1.0".format( stimMol ) )
+        return 1.0e-3   #   1 uM.
+    return ret * 5.0
 
 def estimateTau( htmodel, reacStims ):
     if htmodel:
@@ -424,7 +439,7 @@ def main():
     for ss, rlist in reacStims.items():
         # Note ss is a name, and rlist is a list of names.
         # Build the timeseries first
-        maxConc = findMaxConc(htmodel, ss )
+        maxConc = estimateStimConc(htmodel, ss )
         stimVec = [ 
                 Stim( ss, 0, tau),
                 Stim( ss, maxConc, tau * 2),
