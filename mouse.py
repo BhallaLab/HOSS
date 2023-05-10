@@ -213,11 +213,15 @@ def estimateStimConc( htmodel, stimMol ):
         raise ValueError( "Nonexistent stimulus molecule: ", stimMol )
 
     for name, rr in htmodel.reacInfo.items():
-        # Order of subs is [Reag, [modifier], ligand], or [Reag, [Reag...]
+        # Order of subs is [Reag, [modifier], ligand], or [Reag, [Reag...]]
         # In either a ligand or a single reag case, we use KA.
         ligandIndex = htmodel.molInfo[ rr.subs[-1] ].index
         if ligandIndex == stimMolIdx:
-            ret = max( ret, rr.KA )
+            if len( rr.subs ) == 1: # For single reagent, KA has no units
+                if ret <= 0: # Try to use conc of input molecule, else 1 uM.
+                    ret = 1.0e-3
+            else:
+                ret = max( ret, rr.KA )
         elif len( rr.subs ) > 2 and rr.subs[1] == stimMol:
             # If that didn't work, we could have second arg as a modifier.
             # In this case we use Kmod
