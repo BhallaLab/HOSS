@@ -375,6 +375,7 @@ def main():
     parser = argparse.ArgumentParser( description = "MOUSE: Model Optimizer Using Synthetic signaling Experiments. Generates FindSim format experiment definitions for time-series and dose-responses for each input/output combination, and optionally pairwise multi-input combinations." )
     parser.add_argument( '-a', '--allReacs', action='store_true', help='Flag: when set, generate all possible 1-step stimulus-readout pairs by scanning through all reactions.')
     parser.add_argument( "-s", "--stimuli", type = str, nargs = '+', metavar = "molName", help = "Optional: Molecules to stimulate, as a list of space-separated names.", default = [])
+    parser.add_argument( "-sr", "--stimulusRange", nargs = 4, metavar = "molName low high duration", help = "Optional: Molecule lowVal highVal duration. Generates a step pulse from low to high with settle, stimulus, and post-stimulus times each equal to _duration_.")
     parser.add_argument( "-r", "--readouts", type = str, nargs = '+', metavar = "molName", help = "Optional: Readout molecules to monitor, as a list of space-separated names.", default = [] )
     parser.add_argument( "-m", "--model", type = str, help = "Optional: Filepath for chemical kinetic model in HillTau or SBML format. If model is not provided the synthetic file just has zeros for predicted output." )
     parser.add_argument( "-t", "--tau", type = float, help = "Optional: tau for reaction settling, overrides estimate from model if available. Default = 300 seconds." )
@@ -383,9 +384,15 @@ def main():
     parser.add_argument( '-p', '--pairwise', action='store_true', help='Flag: when set, generate all pairwise Input combinations as well for TS and DR')
     args = parser.parse_args()
 
+    if ((args.stimulusRange != None) + (len( args.stimuli ) > 0) + args.allReacs) > 1:
+        print( "Error: Can only specify one of 'allReacs', 'stimuli' or 'stimulusRange' ")
+        quit()
 
     reacStims = {}
-    for ss in args.stimuli:
+    slist = args.stimuli
+    if args.stimulusRange:
+        slist = [ args.stimulusRange[0] ]
+    for ss in slist:
         rs = reacStims.get( ss )
         if rs:
             rs.extend( args.readouts )
@@ -421,6 +428,9 @@ def main():
         tau = estimateTau( htmodel, reacStims )
     else:
         tau = args.tau
+
+    if args.stimulusRange:
+        tau = float(args.stimulusRange[3])
     plotDt = tau * 3 / 24
     settleTime = tau * 2
 
@@ -443,11 +453,16 @@ def main():
     for ss, rlist in reacStims.items():
         # Note ss is a name, and rlist is a list of names.
         # Build the timeseries first
-        maxConc = estimateStimConc(htmodel, ss )
+        if args.stimulusRange:
+            minConc = float( args.stimulusRange[1] )
+            maxConc = float( args.stimulusRange[2] )
+        else:
+            maxConc = estimateStimConc(htmodel, ss )
+            minConc = 0
         stimVec = [ 
-                Stim( ss, 0, tau),
+                Stim( ss, minConc, tau),
                 Stim( ss, maxConc, tau * 2),
-                Stim( ss, 0, tau * 3)
+                Stim( ss, minConc, tau * 3)
                 ]
         #stimVec.extend( [ Stim( ii, maxConc, tau + (1+jj)*tau/12 ) for jj in range(12) ]  )
         #stimVec.append( Stim( ii, 0, tau * 3 ) )
