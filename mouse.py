@@ -300,6 +300,32 @@ def generateInputBaseline( model, stimName, reacName ):
     '''
     return ret
 
+def generateBufferedMolList( buffer ):
+    ret = []
+    if buffer:
+        if len( buffer ) % 2 != 0:
+            print( "Usage: -b mol conc [mol conc] .... Mol and conc must come in pairs." )
+            quit()
+        for ii in range( 0, len( buffer ), 2 ):
+            name = buffer[ii]
+            val = float( buffer[ii+1] )
+            ret.extend( [
+                    {
+                        "entity": name,
+                        "field": "isBuffered",
+                        "value": 1,
+                        "units": "none"
+                    },
+                    {
+                        "entity": name,
+                        "field": "concInit",
+                        "value": val,
+                        "units": "mM"
+                    }
+                ]
+            )
+    return ret
+
 def generateTimeExperiment( fname, stimVec, refMol, refVals, baselineList ):
     fname = "{}_TS_{}_vs_{}.json".format(fname, refMol, stimVec[0].molName)
     transcriber = getpass.getuser()
@@ -376,6 +402,7 @@ def main():
     parser.add_argument( '-a', '--allReacs', action='store_true', help='Flag: when set, generate all possible 1-step stimulus-readout pairs by scanning through all reactions.')
     parser.add_argument( "-s", "--stimuli", type = str, nargs = '+', metavar = "molName", help = "Optional: Molecules to stimulate, as a list of space-separated names.", default = [])
     parser.add_argument( "-sr", "--stimulusRange", nargs = 4, metavar = "molName low high duration", help = "Optional: Molecule lowVal highVal duration. Generates a step pulse from low to high with settle, stimulus, and post-stimulus times each equal to _duration_.")
+    parser.add_argument( "-b", "--buffer", nargs = '+', metavar = "molName conc", help = "Optional: mol conc [mol conc]... List of buffered molecules with their concentration.")
     parser.add_argument( "-r", "--readouts", type = str, nargs = '+', metavar = "molName", help = "Optional: Readout molecules to monitor, as a list of space-separated names.", default = [] )
     parser.add_argument( "-m", "--model", type = str, help = "Optional: Filepath for chemical kinetic model in HillTau or SBML format. If model is not provided the synthetic file just has zeros for predicted output." )
     parser.add_argument( "-t", "--tau", type = float, help = "Optional: tau for reaction settling, overrides estimate from model if available. Default = 300 seconds." )
@@ -398,6 +425,8 @@ def main():
             rs.extend( args.readouts )
         elif len( args.readouts ) > 0:
             reacStims[ss] = args.readouts
+
+    bufList = generateBufferedMolList( args.buffer )
 
     if args.model:
         jsonDict = hillTau.loadHillTau( args.model )
@@ -446,6 +475,8 @@ def main():
             print( "Error: Specified path is not a dir. Quitting." )
             quit()
         fname = args.dir + "/" + args.findSimFile
+    if args.buffer:
+        fname += "_B_" + args.buffer[0]
 
     msr = stimRange[-2]
 
@@ -477,11 +508,11 @@ def main():
             doserOutputs = { rr:np.zeros(len(stimRange)) for rr in rlist }
 
         for key, val in referenceOutputs.items():
-            baselineDict = generateInputBaseline( htmodel, ss, key )
-            generateTimeExperiment( fname, stimVec, key, val, baselineDict )
+            baselineList = generateInputBaseline( htmodel, ss, key ) + bufList
+            generateTimeExperiment( fname, stimVec, key, val, baselineList )
         for key, val in doserOutputs.items():
-            baselineDict = generateInputBaseline( htmodel, ss, key )
-            generateDoseExperiment( fname, doseVec, key, val, settleTime, baselineDict )
+            baselineList = generateInputBaseline( htmodel, ss, key ) + bufList
+            generateDoseExperiment( fname, doseVec, key, val, settleTime, baselineList )
 
 if __name__ == '__main__':
     main()
