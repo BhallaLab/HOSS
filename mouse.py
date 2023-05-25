@@ -66,7 +66,8 @@ class Stim:
         self.molIndex = 0
 
 
-def runHillTau( model, stimVec, outMols ):
+def runHillTau( model, stimVec, outMols, bufList ):
+
     for i in stimVec:
         mi = model.molInfo.get( i.hillTauMol )
         if mi:
@@ -90,6 +91,16 @@ def runHillTau( model, stimVec, outMols ):
         else:
             raise ValueError( "Nonexistent output molecule: ", i )
     model.reinit()
+    for ii in range( len( bufList ) // 2) :
+        bb = bufList[2*ii+1]
+        ri = model.reacInfo.get( bb["entity"] )
+        if ri:
+            ri.isBuffered = 1
+            model.conc[ ri.prdIndex ] = bb["value"]
+            #print( "buffering {} {} to {}".format( bb["entity"], ri.prdIndex,  bb["value"] ))
+        else:
+            print( "Error: buffer entity {} not found".format( bb["entity"] ) )
+            quit()
     lastt = 0.0
     mi = model.molInfo[outMols[0]]
     for stim in stimVec:
@@ -112,6 +123,12 @@ def runHillTau( model, stimVec, outMols ):
         si = model.reacInfo.get( i.hillTauMol )
         if si:
             si.isBuffered = 0
+
+    for ii in range( len( bufList ) // 2) :
+        bb = bufList[2*ii+1]
+        ri = model.reacInfo.get( bb["entity"] )
+        if ri:
+            ri.isBuffered = 0
 
     return ret
 
@@ -500,9 +517,9 @@ def main():
         doseVec = [ Stim( ss, maxConc * conc/msr, (settleTime + 1) * (1+jj), doSettle = True ) for jj, conc in enumerate( stimRange ) ]
         if args.model != None:
             htmodel.dt = plotDt
-            referenceOutputs = runHillTau( htmodel, stimVec, rlist )
+            referenceOutputs = runHillTau( htmodel, stimVec, rlist, bufList)
             htmodel.dt = settleTime
-            doserOutputs = runHillTau( htmodel, doseVec, rlist )
+            doserOutputs = runHillTau( htmodel, doseVec, rlist, bufList )
         else: 
             referenceOutputs = { rr:np.zeros(1+int(tau*3/plotDt)) for rr in rlist }
             doserOutputs = { rr:np.zeros(len(stimRange)) for rr in rlist }
