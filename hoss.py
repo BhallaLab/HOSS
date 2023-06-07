@@ -83,8 +83,9 @@ def combineScores( eret ):
 
 
 def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
-    fp = open( baseargs["resultFile"], "w" )
-    optfile = baseargs["optfile"]
+    prefix = baseargs["filePrefix"]
+    fp = open( prefix + baseargs["resultFile"], "w" )
+    optfile = prefix + baseargs["optfile"]
     #levelIdx = int(optfile[-6:-5]) # Assume we have only levels 0 to 9.
     totScore = 0.0
     totInitScore = 0.0
@@ -101,7 +102,7 @@ def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
     if __name__ == "__main__":
         print( "Level {} ------- Init Score: {:.3f}   FinalScore {:.3f}       Time: {:.3f} s\n".format( levelIdx, totInitScore / len( retvec ), totAltScore / len( retvec ), t0 ) )
 
-    fnames = { "model": baseargs["model"], "optfile": optfile, "map": baseargs["map"], "resultFile": baseargs["resultFile"] }
+    fnames = { "model": baseargs["model"], "optfile": optfile, "map": baseargs["map"], "resultFile": prefix + baseargs["resultFile"] }
     pargs = []
     rargs = []
     # Catenate all the changed params and values.
@@ -140,6 +141,7 @@ def main( args ):
     parser.add_argument( '-map', '--map', type = str, help='Model entity mapping file. This is a JSON file.' )
     parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files.' )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
+    parser.add_argument( '-fp', '--filePrefix', type = str, help='Optional: Prefix to add to names of optfile and resultFile. Can also be a directory path.', default = "" )
     parser.add_argument( '-p', '--parallel', type = str, help='Optional: Define parallelization model. Options: serial, MPI, threads. Defaults to serial. MPI not yet implemented', default = "serial" )
     parser.add_argument( '-n', '--numProcesses', type = int, help='Optional: Number of blocks to run in parallel, when we are not in serial mode. Note that each block may have multiple experiments also running in parallel. Default is to take numCores/8.', default = 0 )
     parser.add_argument( '-r', '--resultFile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
@@ -182,6 +184,7 @@ def main( args ):
             "exptDir": "./Expts" ,
             "model": "./Models/model.json",
             "map": "./Maps/map.json",
+            "filePrefix": "",
         } 
     baseargs = vars( args )
     for key, val in requiredDefaultArgs.items():
@@ -254,7 +257,7 @@ def main( args ):
         ret = processIntermediateResults( score, baseargs, hl, t2 - t1 )
         t1 = t2
         intermed.append( ret )
-        baseargs["model"] = baseargs["optfile"] # Apply heirarchy to opt
+        baseargs["model"] = baseargs["filePrefix"] + baseargs["optfile"] # Apply heirarchy to opt
         results.append( score )
     processFinalResults( results, baseargs, intermed, time.time() - t0  )
 
