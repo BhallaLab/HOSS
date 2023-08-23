@@ -50,8 +50,8 @@ def logResult(result):
     # results is modified only by the main process, not the pool workers.
     results.append(result)
 
-def worker( fname, returnDict, scoreFunc, modelFile, mapFile, silent, solver, plots ):
-    score, elapsedTime, diagnostics = findSim.innerMain( fname, scoreFunc = scoreFunc, modelFile = modelFile, mapFile = mapFile, hidePlot = False, ignoreMissingObj = True, silent = silent, solver = solver, plots = plots )
+def worker( fname, returnDict, scoreFunc, modelFile, mapFile, silent, solver, plots, hidePlot ):
+    score, elapsedTime, diagnostics = findSim.innerMain( fname, scoreFunc = scoreFunc, modelFile = modelFile, mapFile = mapFile, hidePlot = hidePlot, ignoreMissingObj = True, silent = silent, solver = solver, plots = plots )
     returnDict[fname] = score
 
 def main():
@@ -65,9 +65,13 @@ def main():
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation.', default = "" ) 
     parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "lsoda".', default = "lsoda" )
     parser.add_argument( '-p', '--plot', type = str, nargs = '*', help='Optional: Plot specified fields as time-series', default = "" )
+    parser.add_argument( '-hp', '--hidePlot', action="store_true", help="Flag: default False. When set, turns off plots. Useful to view weighted scores.")
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     args = parser.parse_args()
+    innerMain( args )
 
+
+def innerMain( args ):
     try:
         with open( args.config ) as json_file:
             config = json.load( json_file )
@@ -122,7 +126,7 @@ def main():
         jobs = []
         for f in val: # Iterate through each expt (tsv or json) fname
             fname = baseargs["exptDir"] + "/" + f
-            p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = baseargs["scoreFunc"], modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = baseargs["solver"], plots = args.plot ) )
+            p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = baseargs["scoreFunc"], modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = baseargs["solver"], plots = args.plot, hidePlot = args.hidePlot ) )
             jobs.append(p)
             p.start()
         for proc in jobs:
@@ -131,7 +135,9 @@ def main():
         for key, val in returnDict.items():
             #print( "{:50s}{:.4f}".format( key, val ) )
             totScore += val
-        print( "Mean Score = {:.4f}".format( totScore / len(returnDict) ) )
+        if not args.hidePlot:
+            print( "Mean Score = {:.4f}".format( totScore / len(returnDict) ) )
+    return totScore / len( returnDict )
 
             #ret.append( pool.apply_async( findSim.innerMain, (fname,), dict( modelFile = model, mapFile = mapfile, hidePlot = False, silent = not args.verbose  ), callback = logResult ) )
 
