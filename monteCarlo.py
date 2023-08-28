@@ -49,6 +49,7 @@ import jsonschema
 import os
 import shutil
 import time
+import numpy as np
 import math
 import multiprocessing
 import multi_param_minimization
@@ -97,8 +98,9 @@ def runJson( optName, optDict, args ):
             tabulateOutput = False, ignoreMissingObj = True, 
             silent = True, solver = solver )[0] )
 
-    print( scores )
-    return sum( scores ) / len( scores )
+    ret = sum( scores ) / len( scores )
+    #print( "{} score =".format( ret ) )
+    return ret
 
 
 
@@ -134,7 +136,7 @@ def buildTopNList( pathwayScores, num ):
     numPathways = len( pathwayScores )
     for ii in range( num ):
         ret.append( { name:pp[ii//numPathways] for name, pp in sortedMonte.items() } )
-        print( "Extending by ", len( ret ) )
+        #print( "Extending by ", len( ret ) )
 
     return ret
 
@@ -203,6 +205,32 @@ def mapParamList( objLookup, paramList ):
             print( "Warning: object ", obj, " not found. Skipping" )
     return ret
 
+def computeModelScores( blocks, baseargs, modelLookup ):
+    ret = 0.0
+    nret = 0
+    levelScores = []
+    for hossLevel in blocks: # Assume blocks are in order of execution.
+        lret = 0.0
+        pathwayScores = {}        
+        print( "L{} ".format( hossLevel["hierarchyLevel"] ), end = "" )
+        for name, ob in hossLevel.items():
+            if name == "name" or name == "hierarchyLevel":
+                continue
+            paramList = ob["params"]
+            #print( paramList )
+            #mappedParamList = mapParamList( objLookup, paramList )
+            mappedParamList = mapParamList( modelLookup, paramList )
+            #print( "MMMMMMMMMM = ", mappedParamList )
+            score = runJson(name, ob, baseargs)
+            pathwayScores[name] = score
+            lret += score * score
+            print( "{:12s}{:.3f}    ".format( name, score ), end = "" )
+        ret += lret
+        nret += 1
+        levelScores.append( pathwayScores )
+        print()
+    print( "Final Score for {} = {:.3f}".format( baseargs["model"], np.sqrt( ret/nret ) ) )
+    return levelScores
 
 def runOneModel(blocks, args, baseargs, modelLookup, t0):
     origModel = baseargs['model'] # Use for loading model
@@ -216,6 +244,10 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
     prefix = "MONTE/"
     intermed = []
     results = []
+
+    # First compute the original score. It may well be better.
+    origScores = computeModelScores( blocks, baseargs, modelLookup )
+
     # Here is pseudocode to generate many start models, optimize, and 
     # harvest.
     for hossLevel in blocks: # Assume blocks are in order of execution.
@@ -232,6 +264,7 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
             mappedParamList = mapParamList( modelLookup, paramList )
             #print( "MMMMMMMMMM = ", mappedParamList )
             pathwayScores[name] = []
+
             for imm, mm in enumerate( startModelList ):
                 sname = "{}{}_{}_{}.{}".format( prefix, scramModelName, name, imm, modelFileSuffix )
                 scramParam.generateScrambled( mm, sname, numScramPerModel, mappedParamList, scramRange )
@@ -239,7 +272,7 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
                     baseargs["model"] = "{}{}_{}_{}_{:03d}.{}".format( 
                             prefix, scramModelName, name, 
                             imm, ii, modelFileSuffix )
-                    print( "BASEARGS = ", baseargs["model"] )
+                    #print( "BASEARGS = ", baseargs["model"] )
                     pathwayScores[name].append( 
                             Monte( name, baseargs["model"], imm, ii, 
                             runJson(name, ob, baseargs)) )
@@ -247,10 +280,15 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
 
         topN = buildTopNList( pathwayScores, numTopModels )
         startModelList = []
+        hierarchyLevel = hossLevel["hierarchyLevel"]
+        for idx, tt in enumerate( topN ):
+            for name, monte in tt.items():
+                print( "L{}.{}: {} scores {:.3f}".format( 
+                    hierarchyLevel, idx, name, monte.score ) )
+
         #print( topN )
 
         # Build merged model.
-        hierarchyLevel = hossLevel["hierarchyLevel"]
         for idx, tt in enumerate( topN ):
             firstBlock = True
             outputModel = "topN_{}_{:03d}.{}".format( hierarchyLevel, idx, modelFileSuffix )
@@ -263,6 +301,10 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
                     scramParam.mergeModels( startModel, monte.fname, outputModel, ob["params"] )
                 firstBlock = False
             startModelList.append( outputModel )
+
+    # Finally compute the end score. It should be a lot better.
+    baseargs["model"] = "topN_{}_{:03d}.{}".format( hierarchyLevel, 0, modelFileSuffix )
+    finalScores = computeModelScores( blocks, baseargs, modelLookup )
         
 ########################################################################
 
@@ -283,6 +325,7 @@ def main( args ):
     parser.add_argument( '-n', '--numProcesses', type = int, help='Optional: Number of blocks to run in parallel, when we are not in serial mode. Note that each block may have multiple experiments also running in parallel. Default is to take numCores/8.', default = 0 )
     parser.add_argument( '-r', '--resultFile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation. Default: NRMS' )
+    parser.add_argument( '-scr', '--scramRange', type = float, help='Optional: Factor over which scaling is permitted.', default = 2.0 )
     parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "LSODA".')
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     parser.add_argument( '-st', '--show_ticker', action="store_true", help="Flag: default False. Prints out ticker as optimization progresses.")
