@@ -68,7 +68,9 @@ def main():
     parser.add_argument( '-hp', '--hidePlot', action="store_true", help="Flag: default False. When set, turns off plots. Useful to view weighted scores.")
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     args = parser.parse_args()
-    innerMain( args )
+    totScore = innerMain( args )
+    if args.verbose:
+        print( "Final Score = {:.3f}".format( totScore ) )
 
 
 def innerMain( args ):
@@ -122,7 +124,7 @@ def innerMain( args ):
     ret = []
     manager = multiprocessing.Manager()
     returnDict = manager.dict()
-    for key, val in edict.items(): # Iterate through blocks
+    for blockName, val in edict.items(): # Iterate through blocks
         jobs = []
         for f in val: # Iterate through each expt (tsv or json) fname
             fname = baseargs["exptDir"] + "/" + f
@@ -135,8 +137,8 @@ def innerMain( args ):
         for key, val in returnDict.items():
             #print( "{:50s}{:.4f}".format( key, val ) )
             totScore += val
-        if not args.hidePlot:
-            print( "Mean Score = {:.4f}".format( totScore / len(returnDict) ) )
+        if args.verbose or not args.hidePlot:
+            print( "{:20s} Score = {:.3f}".format( blockName, totScore / len(returnDict) ) )
     return totScore / len( returnDict )
 
             #ret.append( pool.apply_async( findSim.innerMain, (fname,), dict( modelFile = model, mapFile = mapfile, hidePlot = False, silent = not args.verbose  ), callback = logResult ) )
