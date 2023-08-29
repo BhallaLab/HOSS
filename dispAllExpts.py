@@ -124,6 +124,8 @@ def innerMain( args ):
     ret = []
     manager = multiprocessing.Manager()
     returnDict = manager.dict()
+    totScore = 0.0
+    numTot = 0
     for blockName, val in edict.items(): # Iterate through blocks
         jobs = []
         for f in val: # Iterate through each expt (tsv or json) fname
@@ -133,13 +135,15 @@ def innerMain( args ):
             p.start()
         for proc in jobs:
             proc.join()
-        totScore = 0.0
+        score = 0.0
         for key, val in returnDict.items():
             #print( "{:50s}{:.4f}".format( key, val ) )
+            score += val
             totScore += val
+            numTot += 1
         if args.verbose or not args.hidePlot:
-            print( "{:20s} Score = {:.3f}".format( blockName, totScore / len(returnDict) ) )
-    return totScore / len( returnDict )
+            print( "{:20s} Score = {:.3f}".format( blockName, score / len(returnDict) ) )
+    return totScore / numTot
 
             #ret.append( pool.apply_async( findSim.innerMain, (fname,), dict( modelFile = model, mapFile = mapfile, hidePlot = False, silent = not args.verbose  ), callback = logResult ) )
 
