@@ -105,15 +105,18 @@ def runJson( optName, optDict, args ):
 
 
 class Monte:
-    def __init__(self, pathway, fname, imm, ii, score ):
+    def __init__(self, pathway, fname, imm, ii, level, score, cumulativeScore ):
         self.pathway = pathway
         self.fname = fname
-        self.imm = imm
-        self.ii = ii
-        self.score = score
+        self.startModelIdx = imm
+        self.scramModelIdx = ii
+        self.level = level - 1  # self.level is indexed starting at 0.
+        self.score = score      # Score for current level only
+        self.cumulativeScore = cumulativeScore
+        self.rankScore = (self.score + self.cumulativeScore * self.level) / (self.level + 1)
 
     def __lt__( self, other ):
-        return self.score < other.score
+        return self.rankScore < other.rankScore
 
 def buildTopNList( pathwayScores, num ):
     '''
@@ -238,7 +241,6 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
     scramRange = baseargs["scramRange"]
     numScram = baseargs["numScram"]
     numTopModels = baseargs["numTopModels"]
-    startModelList = [origModel]
     modelFileSuffix = origModel.split( "." )[-1]
     scramModelName = "scram"
     prefix = "MONTE/"
@@ -247,13 +249,18 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
 
     # First compute the original score. It may well be better.
     origScores = computeModelScores( blocks, baseargs, modelLookup )
+    startModelList = [(origModel, 0.0)] # Model name and cumulative score
 
     # Here is pseudocode to generate many start models, optimize, and 
     # harvest.
-    for hossLevel in blocks: # Assume blocks are in order of execution.
+    for idx, hossLevel in enumerate(blocks): # Assume blocks are in order of execution.
+        hierarchyLevel = idx + 1
         pathwayScores = {}        
         optBlock = {}
         numScramPerModel = numScram // len(startModelList)
+        print( "startModelList =  ", startModelList )
+        # Can't use the internal hierarchyLevel because it might not be
+        # indexed from zero.
         for name, ob in hossLevel.items():
             if name == "name" or name == "hierarchyLevel":
                 continue
@@ -265,42 +272,61 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
             #print( "MMMMMMMMMM = ", mappedParamList )
             pathwayScores[name] = []
 
-            for imm, mm in enumerate( startModelList ):
+            for imm, (mm, cumulativeScore) in enumerate( startModelList ):
                 sname = "{}{}_{}_{}.{}".format( prefix, scramModelName, name, imm, modelFileSuffix )
                 scramParam.generateScrambled( mm, sname, numScramPerModel, mappedParamList, scramRange )
+                # Here we put in the starting model as it may be best
+                if imm == 0:
+                    ss = origScores[idx][name]
+                else:
+                    ss = cumulativeScore
+                pathwayScores[name].append( 
+                    Monte( name, mm, imm, 0, 
+                    hierarchyLevel, 
+                    ss, ss )
+                )
                 for ii in range( numScramPerModel ):
                     baseargs["model"] = "{}{}_{}_{}_{:03d}.{}".format( 
                             prefix, scramModelName, name, 
                             imm, ii, modelFileSuffix )
                     #print( "BASEARGS = ", baseargs["model"] )
+                    newScore = runJson( name, ob, baseargs )
                     pathwayScores[name].append( 
                             Monte( name, baseargs["model"], imm, ii, 
-                            runJson(name, ob, baseargs)) )
+                            hierarchyLevel, 
+                            newScore, cumulativeScore ) )
 
 
         topN = buildTopNList( pathwayScores, numTopModels )
         startModelList = []
-        hierarchyLevel = hossLevel["hierarchyLevel"]
         for idx, tt in enumerate( topN ):
             for name, monte in tt.items():
-                print( "L{}.{}: {} scores {:.3f}".format( 
-                    hierarchyLevel, idx, name, monte.score ) )
+                print( "L{}.{}: {} scores={:.3f} {:.3f}   fname= {}".format(
+                    hierarchyLevel, idx, name, 
+                    monte.score, monte.rankScore, monte.fname ) )
 
         #print( topN )
 
         # Build merged model.
         for idx, tt in enumerate( topN ):
+            rmsScore = 0.0
             firstBlock = True
             outputModel = "topN_{}_{:03d}.{}".format( hierarchyLevel, idx, modelFileSuffix )
             for name, ob in optBlock.items():
                 monte = tt[name]
+                rmsScore += monte.score * monte.score
                 startModel = monte.fname
                 if firstBlock:
                     shutil.copyfile( startModel, outputModel )
+                    print( "Copyfile ", startModel, "       ", outputModel )
                 else:
                     scramParam.mergeModels( startModel, monte.fname, outputModel, ob["params"] )
                 firstBlock = False
-            startModelList.append( outputModel )
+                print( "CumulativeScore for {} = {:.3f}".format(outputModel, monte.cumulativeScore ) )
+
+            rmsScore = np.sqrt( rmsScore / len( optBlock )  )
+            newScore = (rmsScore + monte.cumulativeScore * monte.level)/(monte.level + 1 )
+            startModelList.append( (outputModel, newScore  ) )
 
     # Finally compute the end score. It should be a lot better.
     baseargs["model"] = "topN_{}_{:03d}.{}".format( hierarchyLevel, 0, modelFileSuffix )
