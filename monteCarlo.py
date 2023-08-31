@@ -48,6 +48,7 @@ import json
 import jsonschema
 import os
 import shutil
+import heapq
 import time
 import numpy as np
 import math
@@ -123,6 +124,31 @@ class Monte:
     def __lt__( self, other ):
         return self.rankScore < other.rankScore
 
+class Row():
+    data = []
+    names = []
+    def __init__( self, idx ):
+        self.idx = list(idx)
+        self.tot = 0.0
+        for dd, ii in zip( self.data, idx ):
+            self.tot += dd[ ii ]
+
+    def print( self ):
+        for ii, nn, dd in zip( self.idx, self.names, self.data ):
+            print( "{}  {:<8.1f}".format( nn, dd[ii] ), end = "" )
+        print( "{:8.1f}".format( self.tot ) )
+
+    def __lt__( self, other ):
+        if self.tot < other.tot:
+            return True
+        elif self.tot == other.tot:
+            return self.idx < other.idx
+        return False
+
+    def __eq__( self, other ):
+        return self.idx == other.idx
+
+
 def buildTopNList( pathwayScores, num ):
     '''
     Generates a sorted list of dicts: ret[rank][pathway_name]
@@ -139,14 +165,55 @@ def buildTopNList( pathwayScores, num ):
     for key, val in pathwayScores.items():
         sortedMonte[key] = sorted( val )[:num]
     # Then do algorithm for best num.
-    # Later.
+
+    topNames = sorted( sortedMonte )
+    topData = [ [ss.rankScore for ss in sortedMonte[nn]] for nn in topNames]
+    print( "TOPDATA = ", topData )
+
+    if len( topNames ) == 1:
+        name = topNames[0]
+        svec = [ {name:mm} for mm in sortedMonte[name] ]
+    else:
+        vec = [Row( [0] * len( topNames ) )]
+        heapq.heapify( vec )
+        svec = []
+
+        while( len( svec ) < num ):
+            print( len( vec ), len( svec ), len( topData ), len( topData[0]) )
+            rr = heapq.heappop( vec )
+            #print( "RR = ", rr )
+            if len( vec ) > 0 and not rr == vec[0]:
+                entry = { nn:sortedMonte[nn][rr.idx[ii]] for ii, nn in enumerate( topNames ) }   
+                print( "ENTRY = {}, {}  {}".format( nn, ii, rr.idx[ii] ) )
+                svec.append( entry )
+            for ii in range( len( topData ) ):
+                idx2 = list(rr.idx)
+                idx2[ii] += 1
+                print( " pushing in idx2", idx2 )
+                heapq.heappush( vec, Row( idx2 ) )
+
+    # Debug Printing stuff:
+    for idx, rr in enumerate( svec ):
+        for key, val in rr.items():
+            print( "{} TOPN {}:{}   s = {:.3f}, {:.3f}".format(idx, key, val.fname, val.rankScore, val.score ) )
+
+
+    return svec
+
+
+    '''
     # Then generate the sorted list of dicts. Here we just do a dummy.
     numPathways = len( pathwayScores )
     for ii in range( num ):
         ret.append( { name:pp[ii//numPathways] for name, pp in sortedMonte.items() } )
         #print( "Extending by ", len( ret ) )
+        
+    for idx, rr in enumerate( ret ):
+        for key, val in rr.items():
+            print( "{} TOPN {}:{}   s = {:.3f}, {:.3f}".format(idx, key, val.fname, val.rankScore, val.score ) )
 
     return ret
+    '''
 
 
 def loadMap( fname ):
@@ -263,7 +330,7 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
         pathwayScores = {}        
         optBlock = {}
         numScramPerModel = numScram // len(startModelList)
-        print( "startModelList =  ", startModelList )
+        #print( "startModelList =  ", startModelList )
         # Can't use the internal hierarchyLevel because it might not be
         # indexed from zero.
         for name, ob in hossLevel.items():
@@ -328,7 +395,7 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
                 else:
                     scramParam.mergeModels( startModel, monte.fname, outputModel, ob["params"] )
                 firstBlock = False
-                print( "CumulativeScore for {} = {:.3f}".format(outputModel, monte.cumulativeScore ) )
+                #print( "CumulativeScore for {} = {:.3f}".format(outputModel, monte.cumulativeScore ) )
 
             rmsScore = np.sqrt( rmsScore / len( optBlock )  )
             newScore = (rmsScore + monte.cumulativeScore * monte.level)/(monte.level + 1 )
