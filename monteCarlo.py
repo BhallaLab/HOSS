@@ -168,7 +168,6 @@ def buildTopNList( pathwayScores, num ):
 
     topNames = sorted( sortedMonte )
     topData = [ [ss.rankScore for ss in sortedMonte[nn]] for nn in topNames]
-    print( "TOPDATA = ", topData )
 
     if len( topNames ) == 1:
         name = topNames[0]
@@ -179,42 +178,20 @@ def buildTopNList( pathwayScores, num ):
         svec = []
 
         while( len( svec ) < num ):
-            print( len( vec ), len( svec ), len( topData ), len( topData[0]) )
+            #print( len( vec ), len( svec ), len( topData ), len( topData[0]) )
             rr = heapq.heappop( vec )
             #print( "RR = ", rr )
             if len( vec ) > 0 and not rr == vec[0]:
                 entry = { nn:sortedMonte[nn][rr.idx[ii]] for ii, nn in enumerate( topNames ) }   
-                print( "ENTRY = {}, {}  {}".format( nn, ii, rr.idx[ii] ) )
+                #print( "ENTRY = {}, {}  {}".format( nn, ii, rr.idx[ii] ) )
                 svec.append( entry )
             for ii in range( len( topData ) ):
                 idx2 = list(rr.idx)
                 idx2[ii] += 1
-                print( " pushing in idx2", idx2 )
+                #print( " pushing in idx2", idx2 )
                 heapq.heappush( vec, Row( idx2 ) )
 
-    # Debug Printing stuff:
-    for idx, rr in enumerate( svec ):
-        for key, val in rr.items():
-            print( "{} TOPN {}:{}   s = {:.3f}, {:.3f}".format(idx, key, val.fname, val.rankScore, val.score ) )
-
-
     return svec
-
-
-    '''
-    # Then generate the sorted list of dicts. Here we just do a dummy.
-    numPathways = len( pathwayScores )
-    for ii in range( num ):
-        ret.append( { name:pp[ii//numPathways] for name, pp in sortedMonte.items() } )
-        #print( "Extending by ", len( ret ) )
-        
-    for idx, rr in enumerate( ret ):
-        for key, val in rr.items():
-            print( "{} TOPN {}:{}   s = {:.3f}, {:.3f}".format(idx, key, val.fname, val.rankScore, val.score ) )
-
-    return ret
-    '''
-
 
 def loadMap( fname ):
     objMap = ""
@@ -372,13 +349,13 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
 
         topN = buildTopNList( pathwayScores, numTopModels )
         startModelList = []
+        '''
         for idx, tt in enumerate( topN ):
             for name, monte in tt.items():
                 print( "L{}.{}: {} scores={:.3f} {:.3f}   fname= {}".format(
                     hierarchyLevel, idx, name, 
                     monte.score, monte.rankScore, monte.fname ) )
-
-        #print( topN )
+        '''
 
         # Build merged model.
         for idx, tt in enumerate( topN ):
@@ -391,7 +368,7 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
                 startModel = monte.fname
                 if firstBlock:
                     shutil.copyfile( startModel, outputModel )
-                    print( "Copyfile ", startModel, "       ", outputModel )
+                    #print( "Copyfile ", startModel, "       ", outputModel )
                 else:
                     scramParam.mergeModels( startModel, monte.fname, outputModel, ob["params"] )
                 firstBlock = False
@@ -403,6 +380,7 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
 
     # Finally compute the end score. It should be a lot better.
     baseargs["model"] = "topN_{}_{:03d}.{}".format( hierarchyLevel, 0, modelFileSuffix )
+    print()
     finalScores = computeModelScores( blocks, baseargs, modelLookup )
         
 ########################################################################
