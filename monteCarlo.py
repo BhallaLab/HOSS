@@ -91,16 +91,21 @@ def runJson( optName, optDict, args ):
     #print( paramList )
 
     scores = []
-    for exptName in optDict["expt"]:
-        scores.append( findSim.innerMain( ed + exptName, 
+    scoreSum = 0.0
+    wtSum = 0.0
+    for exptName, val in optDict["expt"].items():
+        weight = val["weight"]
+        score = findSim.innerMain( ed + exptName, 
             scoreFunc = "NRMS", modelFile = modelFile, mapFile = mapFile, 
             hidePlot = True, scaleParam = paramList, 
             tabulateOutput = False, ignoreMissingObj = True, 
-            silent = True, solver = solver )[0] )
+            silent = True, solver = solver )[0]
+        scoreSum += score * score * weight
+        wtSum += weight
 
-    ret = sum( scores ) / len( scores )
-    #print( "{} score =".format( ret ) )
-    return ret
+    if wtSum == 0.0:
+        return 1.0
+    return np.sqrt( scoreSum / wtSum )
 
 
 
@@ -291,6 +296,7 @@ def runOneModel(blocks, args, baseargs, modelLookup, t0):
                             imm, ii, modelFileSuffix )
                     #print( "BASEARGS = ", baseargs["model"] )
                     newScore = runJson( name, ob, baseargs )
+                    print( ".", end = "", flush=True)
                     pathwayScores[name].append( 
                             Monte( name, baseargs["model"], imm, ii, 
                             hierarchyLevel, 
@@ -348,6 +354,8 @@ def main( args ):
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-fp', '--filePrefix', type = str, help='Optional: Prefix to add to names of optfile and resultFile. Can also be a directory path.', default = "" )
     parser.add_argument( '-p', '--parallel', type = str, help='Optional: Define parallelization model. Options: serial, MPI, threads. Defaults to serial. MPI not yet implemented', default = "serial" )
+    parser.add_argument( '-ns', '--numScram', type = int, help='Optional: Number of Monte Carlo samples to take by scrambling files.', default = 20 )
+    parser.add_argument( '-nt', '--numTopModels', type = int, help='Optional: Number of models out of score-sorted set, to take to next stage of optimization to use as starting points for further scrambling.', default = 5 )
     parser.add_argument( '-n', '--numProcesses', type = int, help='Optional: Number of blocks to run in parallel, when we are not in serial mode. Note that each block may have multiple experiments also running in parallel. Default is to take numCores/8.', default = 0 )
     parser.add_argument( '-r', '--resultFile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation. Default: NRMS' )
