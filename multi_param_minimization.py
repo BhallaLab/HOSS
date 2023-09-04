@@ -198,7 +198,10 @@ def enumerateFindSimFiles( location ):
 
 def dumbTicker( result ):
     global ev
-    ev.procTicker( result )
+    if ev == "":
+        print( ".", end = '' )
+    else:
+        ev.procTicker( result )
     #print( ".", end = '' )
     #sys.stdout.flush()
 
