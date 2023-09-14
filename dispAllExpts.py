@@ -42,6 +42,7 @@ import findSim
 import multiprocessing
 import json
 import time
+import numpy as np
 
 
 results = []
@@ -50,9 +51,9 @@ def logResult(result):
     # results is modified only by the main process, not the pool workers.
     results.append(result)
 
-def worker( fname, returnDict, scoreFunc, modelFile, mapFile, silent, solver, plots, hidePlot ):
+def worker( fname, returnDict, scoreFunc, modelFile, mapFile, silent, solver, plots, hidePlot, weight ):
     score, elapsedTime, diagnostics = findSim.innerMain( fname, scoreFunc = scoreFunc, modelFile = modelFile, mapFile = mapFile, hidePlot = hidePlot, ignoreMissingObj = True, silent = silent, solver = solver, plots = plots )
-    returnDict[fname] = score
+    returnDict[fname] = (score, weight)
 
 def main():
     parser = argparse.ArgumentParser( description = 
@@ -110,7 +111,8 @@ def innerMain( args ):
                 if key not in ("name", "hierarchyLevel" ):
                     expt = val.get( "expt" )
                     if expt:
-                        edict[key] = [e for e in expt]
+                        #edict[key] = [(e, expt[e]["weight"]) for e in expt]
+                        edict[key] = expt
     else: 
         for bl in blocks:
             for i in b:
@@ -118,32 +120,36 @@ def innerMain( args ):
                 if val:
                     expt = val.get( "expt" )
                     if expt:
-                        edict[i] = [e for e in expt]
+                        #edict[i] = [(e, expt[e]["weight"] ) for e in expt]
+                        edict[i] = expt
 
     #pool = Pool( processes = len( edict ) )
     ret = []
     manager = multiprocessing.Manager()
-    returnDict = manager.dict()
     totScore = 0.0
     numTot = 0
     for blockName, val in edict.items(): # Iterate through blocks
         jobs = []
+        returnDict = manager.dict()
         for f in val: # Iterate through each expt (tsv or json) fname
             fname = baseargs["exptDir"] + "/" + f
-            p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = baseargs["scoreFunc"], modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = baseargs["solver"], plots = args.plot, hidePlot = args.hidePlot ) )
+            p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = baseargs["scoreFunc"], modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = baseargs["solver"], plots = args.plot, hidePlot = args.hidePlot, weight = val[f]["weight"] ) )
             jobs.append(p)
             p.start()
         for proc in jobs:
             proc.join()
-        score = 0.0
-        for key, val in returnDict.items():
-            #print( "{:50s}{:.4f}".format( key, val ) )
-            score += val
-            totScore += val
-            numTot += 1
+        sumScore = 0.0
+        sumWts = 0.0
+        for key, (score, wt) in returnDict.items():
+            #print( "{:50s}{:.4f}".format( key, score ) )
+            sumScore += score * score * wt
+            sumWts += wt
+        pathwayScore = np.sqrt( sumScore / sumWts )
+        totScore += pathwayScore
+        numTot += 1
         if args.verbose or not args.hidePlot:
-            print( "{:20s} Score = {:.3f}".format( blockName, score / len(returnDict) ) )
-    return totScore / numTot
+            print( "{:20s} Score = {:.3f}".format( blockName, pathwayScore ) )
+    return totScore / numTot if numTot > 0 else -1.0
 
             #ret.append( pool.apply_async( findSim.innerMain, (fname,), dict( modelFile = model, mapFile = mapfile, hidePlot = False, silent = not args.verbose  ), callback = logResult ) )
 
