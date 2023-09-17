@@ -168,7 +168,12 @@ def combineScores( eret ):
     if numSum == 0:
         return 0,0, 0.0
     else:
-        #print( "----> IS = ", pow( initSum / numSum, 1.0/ScorePow ), "        FS = ", pow( finalSum / numSum, 1.0/ScorePow ) )
+        """
+        print( "----> IS = {:.3f}   FS = {:.3f}, score = {:.3f}, ".format( 
+            pow( initSum / numSum, 1.0/ScorePow ), 
+            pow( finalSum / numSum, 1.0/ScorePow ), 
+            fis, numSum ) )
+        """
         return pow( initSum / numSum, 1.0/ScorePow ), pow( finalSum / numSum, 1.0/ScorePow )
 
 
@@ -190,7 +195,7 @@ def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
     if not math.isclose( totScore, totAltScore, rel_tol = 1e-3, abs_tol = 1e-6 ):
         print( "Warning: Score mismatch in processIntermediateResults: ", totScore, totAltScore )
     if __name__ == "__main__":
-        print( "Level {} ------- Init Score: {:.3f}   FinalScore {:.3f}       Time: {:.3f} s\n".format( levelIdx, totInitScore / len( retvec ), totAltScore / len( retvec ), t0 ) )
+        print( "Level {} ------- Init Score: {:.3f}   OptimizedScore {:.3f}       Time: {:.3f} s\n".format( levelIdx, totInitScore / len( retvec ), totAltScore / len( retvec ), t0 ) )
 
     fnames = { "model": baseargs["model"], "optfile": optfile, "map": baseargs["map"], "resultFile": prefix + baseargs["resultFile"] }
     pargs = []
@@ -215,7 +220,12 @@ def processFinalResults( results, baseargs, intermed, t0 ):
     numRet = sum ( [ ii[2] for ii in intermed ] )
     #print( "Multilevel optimization complete in {:.3f} s--- Mean Score = {:.3f} ".format( t0, totScore/numScore ) )
     #if __name__ == "__main__":
-    print( "{}: HOSS opt: Init Score = {:.3f}, Final = {:.3f}, Time={:.3f}s".format( baseargs['optfile'], totInitScore/numRet, totAltScore/numRet, t0 ))
+    print( "{}: HOSS opt: Init Score = {:.3f}, Final = {:.3f} {:.3f}, Time={:.3f}s".format( 
+        baseargs['optfile'], 
+        totInitScore/numRet, 
+        totAltScore/numRet, 
+        totScore/numRet, 
+        t0 ))
 
 #######################################################################
 
@@ -368,7 +378,9 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0 ):
         intermed.append( ret )
         baseargs["model"] = baseargs["filePrefix"] + baseargs["optfile"] # Apply heirarchy to opt
         results.append( score )
-    processFinalResults( results, baseargs, intermed, time.time() - t0  )
+    print( "MODELFILE = ", baseargs["model"] )
+    computeModelScores( blocks, baseargs, time.time() - t0 )
+    #processFinalResults( results, baseargs, intermed, time.time() - t0  )
 
 def worker( baseargs, exptFile ):
     score, elapsedTime, diagnostics = findSim.innerMain( exptFile, 
@@ -378,7 +390,7 @@ def worker( baseargs, exptFile ):
             solver = "LSODA", plots = False )
     return score
 
-def computeModelScores( blocks, baseargs ):
+def computeModelScores( blocks, baseargs, runtime ):
     MIN_BOUND = 1e-10
     MAX_BOUND = 1e6
     ret = 0.0
@@ -431,7 +443,7 @@ def computeModelScores( blocks, baseargs ):
         mean = meanPathwayScore/numPathways if numPathways > 0 else -1.0
         totScore += mean
         levelScores.append( scoreDict )
-    print( "Final Score for {} = {:.3f} # = {}".format( baseargs["model"], totScore / len( levelScores ), len( levelScores ) ) )
+    print( "Final Score for {} levels in {} = {:.3f}, Time={:.2f}s".format( len( levelScores ), baseargs["model"], totScore / len( levelScores ), runtime) )
     return levelScores
 
 
@@ -447,9 +459,10 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     prefix = "MONTE/"
     intermed = []
     results = []
+    t0 = time.time()
 
     # First compute the original score. It may well be better.
-    origScores = computeModelScores( blocks, baseargs )
+    origScores = computeModelScores( blocks, baseargs, 0 )
     #quit()
     startModelList = [(origModel, 0.0)] # Model name and cumulative score
 
@@ -540,7 +553,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     # Finally compute the end score. It should be a lot better.
     baseargs["model"] = "topN_{}_{:03d}.{}".format( hierarchyLevel, 0, modelFileSuffix )
     print()
-    finalScores = computeModelScores( blocks, baseargs )
+    finalScores = computeModelScores( blocks, baseargs, time.time() - t0 )
 
 #######################################################################
 
