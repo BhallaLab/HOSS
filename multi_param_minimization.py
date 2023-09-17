@@ -293,6 +293,7 @@ class EvalFunc:
         #print( "ret = {:.3f}, penalty = {:.3f}, final score = {:.3f}".format( ret, boundsPenalty, ret + boundsPenalty ) )
         self.sumScore = ret
         self.boundsPenalty = boundsPenalty
+        #print( "doEval: ret={:.3f}, boundsPenalty={:.3f} ".format( ret, boundsPenalty) )
         return ret + boundsPenalty
 
 def optCallback( x ):
