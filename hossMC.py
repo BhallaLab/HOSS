@@ -231,6 +231,7 @@ def processFinalResults( results, baseargs, intermed, t0 ):
 
 def runOptSerial( optBlock, baseargs ):
     score = []
+    #print( "Model = {}, optfile = {}".format( baseargs['model'], baseargs['optfile'] ) )
     for name, ob in optBlock.items():
         #print( "\n", name, ob, "\n###########################################" )
         score.append( multi_param_minimization.runJson(name, ob, baseargs ) )
@@ -254,9 +255,7 @@ def threadProc( name, ob, baseargs ):
 def runOptThreads( optBlock, baseargs ):
     numProcesses = baseargs["numProcesses"]
     if numProcesses == 0:
-        numProcesses = multiprocessing.cpu_count() // 8 # Assume 8 expts per opt
-    if numProcesses == 0:
-        numProcesses = 1
+        numProcesses = max( multiprocessing.cpu_count()//8, 1)
     numProcesses = min( numProcesses, len(optBlock) )
 
     pool = multiprocessing.Pool( processes = numProcesses )
@@ -331,11 +330,59 @@ def loadConfig( args ):
     return baseargs, config
 
 #######################################################################
-
-def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0 ):
+def runInitScramThenOptimize( blocks, baseargs, t0 ):
     origModel = baseargs['model'] # Use for loading model
-    optModel = baseargs['optfile'] # Use for final model save
-    optResults = baseargs['resultFile'] # Use for final results
+    modelFileSuffix = origModel.split( "." )[-1]
+    scramModelName = "scram"
+    prefix = "MONTE/"
+    numProcesses = baseargs["numProcesses"]
+    if numProcesses == 0:
+        numProcesses = max( multiprocessing.cpu_count()//8, 1)
+
+    pool = multiprocessing.Pool( processes = numProcesses )
+    scramRange = baseargs["scramRange"]
+    sname = "{}{}.{}".format( prefix, scramModelName, modelFileSuffix )
+    scramParam.generateScrambled( origModel, baseargs["map"], sname, 
+            baseargs["numInitScram"], None, scramRange )
+
+    pool = multiprocessing.Pool( processes = numProcesses )
+    ret = []
+    for ii in range( baseargs["numInitScram"] ):
+        newargs = dict( baseargs )
+        newargs["model"] = "{}{}_{:03d}.{}".format( prefix, 
+            scramModelName, ii, modelFileSuffix )
+        ret.append( pool.apply_async( wrapRunOptimizer, args = ( blocks, newargs, ii ), callback = ticker ) )
+    score = [ rr.get() for rr in ret ]
+    # Do something with lots of scores.
+    for scramIdx, scramVal in enumerate( score ):    
+        totScore = 0.0
+        for level, ss in enumerate( scramVal ):
+            # Each level contains a scoreDict of { pathway: score }
+            pathwayScore = 0.0
+            for pp, val in ss.items():
+                print( "{:12s}{:.3f}   ".format(pp, val), end="" )
+                pathwayScore += val
+            print()
+            totScore += (pathwayScore / len( ss ) if len( ss ) > 0 else 0.0)
+        print( "Final Score for scramIdx {:03d} in {} = {:.3f}".format(
+            scramIdx, baseargs["model"], totScore / len( scramVal ) ) )
+    print( "Total user wallclock time = {:.2f}s".format( time.time() - t0) )
+
+    return score
+
+def wrapRunOptimizer( blocks, baseargs, idx ):
+    currProc = multiprocessing.current_process()
+    currProc.daemon = False  # This allows nested multiprocessing.
+    return runOptimizer( blocks, baseargs, "serial", [], time.time(), idx )
+
+def insertFileIdx( fname, idx ):
+    [fpre, fext] = os.path.splitext( fname )
+    return "{}_{:03d}{}".format( fpre, idx, fext )
+
+
+def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0, 
+        idx = None ):
+    origModel = baseargs['model'] # Use for loading model
     modelFileSuffix = origModel.split( "." )[-1]
     results = []
     intermed = []
@@ -353,6 +400,11 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0 ):
                 baseargs['optfile'] = val["optModelFile"]
             if "resultFile" in val:
                 baseargs['resultFile'] = val["resultFile"]
+
+            if idx != None: # Assign index to the optimization file names.
+                baseargs['optfile'] = insertFileIdx( baseargs['optfile'], idx )
+                baseargs['resultFile'] = insertFileIdx( baseargs['resultFile'], idx )
+
             # Either run all items or run named items in block.
             #print( "Args.blocks = ", args.blocks, "     Key = ", key )
             if blocksToRun == [] or key in blocksToRun:
@@ -378,8 +430,7 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0 ):
         intermed.append( ret )
         baseargs["model"] = baseargs["filePrefix"] + baseargs["optfile"] # Apply heirarchy to opt
         results.append( score )
-    print( "MODELFILE = ", baseargs["model"] )
-    computeModelScores( blocks, baseargs, time.time() - t0 )
+    return computeModelScores( blocks, baseargs, time.time() - t0 )
     #processFinalResults( results, baseargs, intermed, time.time() - t0  )
 
 def worker( baseargs, exptFile ):
@@ -574,6 +625,7 @@ def main( args ):
     parser.add_argument( '-n', '--numProcesses', type = int, help='Optional: Number of blocks to run in parallel, when we are not in serial mode. Note that each block may have multiple experiments also running in parallel. Default is to take numCores/8.', default = 0 )
     parser.add_argument( '-ns', '--numScram', type = int, help='Optional: Number of Monte Carlo samples to take by scrambling files. By default no Monte Carlo sampling will be done', default = 0 )
     parser.add_argument( '-nt', '--numTopModels', type = int, help='Optional: For Monte Carlo, number of models out of score-sorted set, to take to next stage of optimization to use as starting points for further scrambling. By default no Monte Carlo sampling will be done.', default = 0 )
+    parser.add_argument( '-ni', '--numInitScram', type = int, help='Optional: Number of initial models to generate by scrambling all parameters of initial model file. Each one of these scrambled models will then be used as the start point for a full, non-MC optimization. By default no scrambling will be done. Each optimization will be run on a different thread, up to the limit set by numProcesses. If set, this overrides numScram and numTopModels options.', default = 0 )
     parser.add_argument( '-r', '--resultFile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation. Default: NRMS' )
     parser.add_argument( '-scr', '--scramRange', type = float, help='Optional, used only when doing Monte Carlo sampling: Range for scrambling model parameters. Default: 2.0', default = 2.0 )
@@ -585,7 +637,9 @@ def main( args ):
     baseargs, config = loadConfig( args )
     blocks = config["HOSS"]
 
-    if baseargs["numScram"] == 0 or baseargs["numTopModels"] == 0:
+    if baseargs["numInitScram"] > 0:
+        runInitScramThenOptimize( blocks, baseargs, t0 )
+    elif baseargs["numScram"] == 0 or baseargs["numTopModels"] == 0:
         runOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
     else:
         runMCoptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
