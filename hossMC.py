@@ -70,9 +70,16 @@ class Monte:
         self.score = score      # Score for current level only
         self.cumulativeScore = cumulativeScore
         self.rankScore = (self.score + self.cumulativeScore * self.level) / (self.level + 1)
+        #print( "making Monte {}.{}.{}.{}".format( pathway, fname, imm, ii))
 
     def __lt__( self, other ):
-        return self.rankScore < other.rankScore
+        return self.score < other.score
+
+    def __eq__( self, other ):
+        return self.fname == other.fname
+
+    def __hash__( self ):
+        return hash( self.fname + str( self.startModelIdx ) + str( self.scramModelIdx ) + str( self.level ) )
 
 class Row():
     data = []
@@ -114,6 +121,7 @@ def buildTopNList( pathwayScores, num ):
     # first get top N = num for each pathway.
     for key, val in pathwayScores.items():
         sortedMonte[key] = sorted( val )[:num]
+        #print( "topN: L1 = {}, L2 = {}".format( len( val ), len( set( val ) ) ) )
     # Then do algorithm for best num.
 
     topNames = sorted( sortedMonte )
@@ -166,14 +174,14 @@ def combineScores( eret ):
             finalSum += pow( fis, ScorePow ) * ee["weight"]
             numSum += ee["weight"]
     if numSum == 0:
-        return 0,0, 0.0
+        return 0.0, 0.0
     else:
         """
-        print( "----> IS = {:.3f}   FS = {:.3f}, score = {:.3f}, ".format( 
+        """
+        print( "----> IS={:.3f}   FS={:.3f}, score={:.3f}, numSum={:.3f}".format( 
             pow( initSum / numSum, 1.0/ScorePow ), 
             pow( finalSum / numSum, 1.0/ScorePow ), 
-            fis, numSum ) )
-        """
+            finalSum, numSum ) )
         return pow( initSum / numSum, 1.0/ScorePow ), pow( finalSum / numSum, 1.0/ScorePow )
 
 
@@ -246,11 +254,13 @@ def runOptSerial( optBlock, baseargs ):
 def ticker( arg ):
     return
 
+'''
 def threadProc( name, ob, baseargs ):
     currProc = multiprocessing.current_process()
     currProc.daemon = False  # This allows nested multiprocessing.
     #print( "\n", name, ob, "\n###########################################" )
     return multi_param_minimization.runJson(name, ob, baseargs )
+'''
 
 def runOptThreads( optBlock, baseargs ):
     numProcesses = baseargs["numProcesses"]
@@ -259,10 +269,9 @@ def runOptThreads( optBlock, baseargs ):
     numProcesses = min( numProcesses, len(optBlock) )
 
     pool = multiprocessing.Pool( processes = numProcesses )
-    score = []
     ret = []
     for name, ob in optBlock.items():
-        ret.append( pool.apply_async( threadProc, args = ( name, ob, baseargs ), callback = ticker ) )
+        ret.append( pool.apply_async( wrapMultiParamMinimizer, args = ( name, ob, baseargs ), callback = ticker ) )
     score = [rr.get() for rr in ret ]
 
     #print( "Thread SCORE = ", [ss[0].fun for ss in score] )
@@ -498,6 +507,48 @@ def computeModelScores( blocks, baseargs, runtime ):
     return levelScores
 
 
+#######################################################################
+## Stuff for MC optimizer
+
+def analyzeMCthreads( name, modelNum, hierarchyLevel, threadRet, numProcesses, pathwayScores, mapFile ):
+    for ii, rr in enumerate( threadRet ):
+        # rr[0] is the return scores array, rr[1] is baseargs["model"]
+        if numProcesses == 1:
+            score = rr[0]
+            #print( "single proc" )
+        else:
+            #print( "num proc = ", numProcesses )
+            score = rr[0].get()
+        #scoreList = [rr.get() for rr in threadRet ]
+        #for score in scoreList:
+        initScore, newScore = combineScores( score[1] )
+        print( ".", end = "", flush=True)
+        pathwayScores[name].append( 
+                Monte( name, rr[1], modelNum, ii, 
+                hierarchyLevel, 
+                newScore, 0.0 ) )
+        optfile = rr[1].replace( "MONTE", "OPTIMIZED" )
+        fnames = { "model": rr[1], "optfile": optfile, "map": mapFile, "resultFile": "resultFile" }
+        pargs = []
+        rargs = []
+        #print( "SSSSSSSSSSSSSSSSSSSS\n", score, "\n\n" )
+        #print( "SSSSSSSSSSSSSSSSSSSS00000000\n", score[0]["x"], "\n\n" )
+        #print( "SSSSSSSSSSSSSSSSSSSS33333333\n", score[3], "\n\n" )
+        '''
+        quit()
+        for (results, eret, optTime, paramArgs) in score:
+            rargs.extend( results.x )
+            pargs.extend( paramArgs )
+        '''
+        
+        #multi_param_minimization.saveTweakedModelFile( {}, pargs, rargs, fnames )
+        multi_param_minimization.saveTweakedModelFile( {}, score[3], score[0]["x"], fnames )
+
+
+def wrapMultiParamMinimizer( name, optBlock, baseargs ):
+    currProc = multiprocessing.current_process()
+    currProc.daemon = False  # This allows nested multiprocessing.
+    return multi_param_minimization.runJson( name, optBlock, baseargs )
 
 def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     origModel = baseargs['model'] # Use for loading model
@@ -510,6 +561,10 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     prefix = "MONTE/"
     intermed = []
     results = []
+    numProcesses = baseargs["numProcesses"]
+    if numProcesses == 0:
+        numProcesses = max( multiprocessing.cpu_count()//8, 1)
+    pool = multiprocessing.Pool( processes = numProcesses )
     t0 = time.time()
 
     # First compute the original score. It may well be better.
@@ -546,7 +601,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
                 # Here we put in the starting model as it may be best
                 if imm == 0:
                     ss = origScores[idx][name]
-                    print( "ORIG SCORE {} = {:.3f}".format( name, ss ) )
+                    #print( "ORIG SCORE {} = {:.3f}".format( name, ss ) )
                 else:
                     ss = cumulativeScore
                 pathwayScores[name].append( 
@@ -554,19 +609,20 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
                     hierarchyLevel, 
                     ss, ss )
                 )
+                threadRet = []
                 for ii in range( numScramPerModel ):
                     baseargs["model"] = "{}{}_{}_{}_{:03d}.{}".format( 
                             prefix, scramModelName, name, 
                             imm, ii, modelFileSuffix )
                     #print( "BASEARGS = ", baseargs["model"] )
                     #newScore = runJson( name, ob, baseargs )
-                    score = multi_param_minimization.runJson( name, ob, baseargs )
-                    initScore, newScore = combineScores( score[1] )
-                    print( ".", end = "", flush=True)
-                    pathwayScores[name].append( 
-                            Monte( name, baseargs["model"], imm, ii, 
-                            hierarchyLevel, 
-                            newScore, cumulativeScore ) )
+                    if numProcesses == 1:
+                        #print( "start single proc, t={:.3f} ".format( time.time() - t0  ) )
+                        threadRet.append( ( multi_param_minimization.runJson( name, ob, baseargs ), baseargs["model"] ) )
+                    else:
+                        #print( "start multi proc. num proc = {}, t = {:.3f}".format( numProcesses, time.time() - t0) )
+                        threadRet.append( ( pool.apply_async( wrapMultiParamMinimizer, args = ( name, ob, dict( baseargs ) ), callback = ticker ), baseargs["model"] ) )
+                analyzeMCthreads( name, imm, hierarchyLevel, threadRet, numProcesses, pathwayScores, baseargs["map"] )
 
         if len( optBlock ) == 0:
             continue        # Nothing to see here, move along to next level
@@ -576,7 +632,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
         if baseargs["verbose"]:
             for idx, tt in enumerate( topN ):
                 for name, monte in tt.items():
-                    print( "\nL{}.{}: {} scores={:.3f} {:.3f}   fname= {}".format(
+                    print( "\nL{}.{}: {} scores={:.5f} {:.5f}   fname= {}".format(
                         hierarchyLevel, idx, name, 
                         monte.score, monte.rankScore, monte.fname ) )
 
@@ -588,12 +644,12 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
             for name, ob in optBlock.items():
                 monte = tt[name]
                 rmsScore += monte.score * monte.score
-                startModel = monte.fname
+                startModel = monte.fname.replace ( "MONTE", "OPTIMIZED" )
                 if firstBlock:
                     shutil.copyfile( startModel, outputModel )
                     #print( "Copyfile ", startModel, "       ", outputModel )
                 else:
-                    scramParam.mergeModels( startModel, mapFile, monte.fname, outputModel, ob["params"] )
+                    scramParam.mergeModels( startModel, mapFile, monte.fname.replace( "MONTE", "OPTIMIZED" ), outputModel, ob["params"] )
                 firstBlock = False
                 #print( "CumulativeScore for {} = {:.3f}".format(outputModel, monte.cumulativeScore ) )
 
