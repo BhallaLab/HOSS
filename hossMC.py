@@ -69,7 +69,8 @@ class Monte:
         self.level = level - 1  # self.level is indexed starting at 0.
         self.score = score      # Score for current level only
         self.cumulativeScore = cumulativeScore
-        self.rankScore = (self.score + self.cumulativeScore * self.level) / (self.level + 1)
+        self.rankScore = self.score
+        #self.rankScore = (self.score + self.cumulativeScore * self.level) / (self.level + 1)
         #print( "making Monte {}.{}.{}.{}".format( pathway, fname, imm, ii))
 
     def __lt__( self, other ):
@@ -178,10 +179,10 @@ def combineScores( eret ):
     else:
         """
         """
-        print( "----> IS={:.3f}   FS={:.3f}, score={:.3f}, numSum={:.3f}".format( 
+        print( "----> IS={:.3f}   FS={:.3f}, finalSum={:.3f}, numSum={:.3f}".format( 
             pow( initSum / numSum, 1.0/ScorePow ), 
             pow( finalSum / numSum, 1.0/ScorePow ), 
-            finalSum, numSum ) )
+            finalSum, numSum ), flush = True )
         return pow( initSum / numSum, 1.0/ScorePow ), pow( finalSum / numSum, 1.0/ScorePow )
 
 
@@ -513,14 +514,15 @@ def computeModelScores( blocks, baseargs, runtime ):
 def analyzeMCthreads( name, modelNum, hierarchyLevel, threadRet, numProcesses, pathwayScores, mapFile ):
     for ii, rr in enumerate( threadRet ):
         # rr[0] is the return scores array, rr[1] is baseargs["model"]
+        # scores array is ( results, eret, time.time, paramArgs )
+        # results.x is the solution vector
+        # eret =[{ "expt":e[0], "weight":1, "score": ret, "initScore": 0} for e in ev.expts ]
         if numProcesses == 1:
             score = rr[0]
             #print( "single proc" )
         else:
             #print( "num proc = ", numProcesses )
             score = rr[0].get()
-        #scoreList = [rr.get() for rr in threadRet ]
-        #for score in scoreList:
         initScore, newScore = combineScores( score[1] )
         print( ".", end = "", flush=True)
         pathwayScores[name].append( 
@@ -529,19 +531,7 @@ def analyzeMCthreads( name, modelNum, hierarchyLevel, threadRet, numProcesses, p
                 newScore, 0.0 ) )
         optfile = rr[1].replace( "MONTE", "OPTIMIZED" )
         fnames = { "model": rr[1], "optfile": optfile, "map": mapFile, "resultFile": "resultFile" }
-        pargs = []
-        rargs = []
-        #print( "SSSSSSSSSSSSSSSSSSSS\n", score, "\n\n" )
-        #print( "SSSSSSSSSSSSSSSSSSSS00000000\n", score[0]["x"], "\n\n" )
-        #print( "SSSSSSSSSSSSSSSSSSSS33333333\n", score[3], "\n\n" )
-        '''
-        quit()
-        for (results, eret, optTime, paramArgs) in score:
-            rargs.extend( results.x )
-            pargs.extend( paramArgs )
-        '''
         
-        #multi_param_minimization.saveTweakedModelFile( {}, pargs, rargs, fnames )
         multi_param_minimization.saveTweakedModelFile( {}, score[3], score[0]["x"], fnames )
 
 
@@ -570,13 +560,17 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     # First compute the original score. It may well be better.
     origScores = computeModelScores( blocks, baseargs, 0 )
     #quit()
-    startModelList = [(origModel, 0.0)] # Model name and cumulative score
+    startModelList = [(origModel, 0.0)] # Model name and score
 
     for idx, hossLevel in enumerate(blocks): # Assume blocks are in order of execution.
         hierarchyLevel = idx + 1
         pathwayScores = {}        
         optBlock = {}
-        numScramPerModel = numScram // len(startModelList)
+        if idx == 0 and baseargs["numInitScram"] > 0: 
+            # Starting level, we have a single model to scramble
+            numScramPerModel = baseargs["numInitScram"]
+        else:
+            numScramPerModel = numScram // len(startModelList)
         #print( "startModelList =  ", startModelList )
         # Can't use the internal hierarchyLevel because it might not be
         # indexed from zero.
@@ -595,20 +589,20 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
             #print( paramList )
             pathwayScores[name] = []
 
-            for imm, (mm, cumulativeScore) in enumerate( startModelList ):
+            for imm, (mm, score) in enumerate( startModelList ):
                 sname = "{}{}_{}_{}.{}".format( prefix, scramModelName, name, imm, modelFileSuffix )
                 scramParam.generateScrambled( mm, mapFile, sname, numScramPerModel, paramList, scramRange )
                 # Here we put in the starting model as it may be best
                 if imm == 0:
                     ss = origScores[idx][name]
                     #print( "ORIG SCORE {} = {:.3f}".format( name, ss ) )
-                else:
-                    ss = cumulativeScore
-                pathwayScores[name].append( 
-                    Monte( name, mm, imm, 0, 
-                    hierarchyLevel, 
-                    ss, ss )
-                )
+                    pathwayScores[name].append( 
+                        Monte( name, mm, imm, 0, 
+                        hierarchyLevel, 
+                        ss, ss )
+                    )
+                # We do NOT try to reuse topN model, it would need 
+                # calculation of expts and is too messy.
                 threadRet = []
                 for ii in range( numScramPerModel ):
                     baseargs["model"] = "{}{}_{}_{}_{:03d}.{}".format( 
@@ -634,7 +628,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
                 for name, monte in tt.items():
                     print( "\nL{}.{}: {} scores={:.5f} {:.5f}   fname= {}".format(
                         hierarchyLevel, idx, name, 
-                        monte.score, monte.rankScore, monte.fname ) )
+                        monte.score, monte.rankScore, monte.fname ), flush=True )
 
         # Build merged model.
         for idx, tt in enumerate( topN ):
@@ -654,8 +648,9 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
                 #print( "CumulativeScore for {} = {:.3f}".format(outputModel, monte.cumulativeScore ) )
 
             rmsScore = np.sqrt( rmsScore / len( optBlock )  )
-            newScore = (rmsScore + monte.cumulativeScore * monte.level)/(monte.level + 1 )
-            startModelList.append( (outputModel, newScore  ) )
+            #newCumulativeScore = (rmsScore + monte.cumulativeScore * monte.level)/(monte.level + 1 )
+            #startModelList.append( (outputModel, newCumulativeScore  ) )
+            startModelList.append( (outputModel, rmsScore  ) )
 
     # Finally compute the end score. It should be a lot better.
     baseargs["model"] = "topN_{}_{:03d}.{}".format( hierarchyLevel, 0, modelFileSuffix )
@@ -693,11 +688,14 @@ def main( args ):
     baseargs, config = loadConfig( args )
     blocks = config["HOSS"]
 
-    if baseargs["numInitScram"] > 0:
-        runInitScramThenOptimize( blocks, baseargs, t0 )
-    elif baseargs["numScram"] == 0 or baseargs["numTopModels"] == 0:
-        runOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
-    else:
+    if baseargs["numScram"] == 0 or baseargs["numTopModels"] == 0:
+        if baseargs["numInitScram"] > 0:
+            runInitScramThenOptimize( blocks, baseargs, t0 )
+        else:
+            runOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
+    elif baseargs["numScram"] > 0 and baseargs["numTopModels"] > 0:
+        # This optionally uses numInitScram for the first set of samples,
+        # if it is defined. Else uses numScram
         runMCoptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
 
 
