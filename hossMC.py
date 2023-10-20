@@ -478,7 +478,7 @@ def computeModelScores( blocks, baseargs, runtime ):
             else:
                 raise( "Missing Expt list in pathway " + expt )
             if len( exptList ) == 1:
-                pathwayScore = worker( baseargs, hossLevel[exptList[0]] )
+                pathwayScore = worker( baseargs, ed + exptList[0] )
                 meanPathwayScore += pathwayScore
                 numPathways += 1
             elif len( exptList ) > 1:
