@@ -57,7 +57,7 @@ def worker( fname, returnDict, scoreFunc, modelFile, mapFile, silent, solver, pl
 
 def main():
     parser = argparse.ArgumentParser( description = 
-            'This script displays simulation results compared with experiments for all the experiments defined in the optimization configuration file (a json file). It runs in serial.')
+            'This script displays simulation results compared with experiments for all the experiments defined in the optimization configuration file (a json file).')
     parser.add_argument( 'config', type = str, help='Required: JSON configuration file, typically same file as used for doing the optimization.')
     parser.add_argument( '-b', '--blocks', nargs='*', default=[],  help='Blocks to display within the JSON file. Defaults to empty, in which case all of them are display. Each block is the string identifier for the block in the JSON file.' )
     parser.add_argument( '-m', '--model', type = str, help='Optional: File name for alternative model to run.', default = "" )
@@ -70,8 +70,8 @@ def main():
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     args = parser.parse_args()
     totScore = innerMain( args )
-    if args.verbose:
-        print( "Final Score = {:.3f}".format( totScore ) )
+    if args.verbose or args.hidePlot:
+        print( "Final Score = {:.4f}".format( totScore ) )
 
 
 def innerMain( args ):
@@ -103,18 +103,22 @@ def innerMain( args ):
     if args.map != "":
         mapfile = args.map
     b = args.blocks
-    edict = {}
+    blockList = []
     blocks = config["HOSS"]
     if len( b ) == 0:
         for bl in blocks:
-            for key, val in bl.items():
-                if key not in ("name", "hierarchyLevel" ):
+            edict = {}
+            for pathway, val in bl.items():
+                if pathway not in ("name", "hierarchyLevel" ):
                     expt = val.get( "expt" )
                     if expt:
                         #edict[key] = [(e, expt[e]["weight"]) for e in expt]
-                        edict[key] = expt
+                        edict[pathway] = expt
+                        #print( "Edict[{}] = {}".format( pathway, expt ) )
+            blockList.append( edict )
     else: 
         for bl in blocks:
+            edict = {}
             for i in b:
                 val = bl.get( i )
                 if val:
@@ -122,33 +126,43 @@ def innerMain( args ):
                     if expt:
                         #edict[i] = [(e, expt[e]["weight"] ) for e in expt]
                         edict[i] = expt
+            blockList.append( edict )
 
-    #pool = Pool( processes = len( edict ) )
     ret = []
     manager = multiprocessing.Manager()
     totScore = 0.0
     numTot = 0
-    for blockName, val in edict.items(): # Iterate through blocks
-        jobs = []
-        returnDict = manager.dict()
-        for f in val: # Iterate through each expt (tsv or json) fname
-            fname = baseargs["exptDir"] + "/" + f
-            p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = baseargs["scoreFunc"], modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = baseargs["solver"], plots = args.plot, hidePlot = args.hidePlot, weight = val[f]["weight"] ) )
-            jobs.append(p)
-            p.start()
-        for proc in jobs:
-            proc.join()
-        sumScore = 0.0
-        sumWts = 0.0
-        for key, (score, wt) in returnDict.items():
-            #print( "{:50s}{:.4f}".format( key, score ) )
-            sumScore += score * score * wt
-            sumWts += wt
-        pathwayScore = np.sqrt( sumScore / sumWts )
-        totScore += pathwayScore
+    for idx, edict in enumerate( blockList ):
+        sumPathwayScore = 0.0
+        numPathways = 0
+        if args.verbose or args.hidePlot:
+            print( "L{:<3d}".format( idx + 1 ), end = "" )
+        for pathName, val in edict.items(): # Go through pathways
+            jobs = []
+            returnDict = manager.dict()
+            for f in val: # Iterate through each expt (findsim.json)
+                fname = baseargs["exptDir"] + "/" + f
+                p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = baseargs["scoreFunc"], modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = baseargs["solver"], plots = args.plot, hidePlot = args.hidePlot, weight = val[f]["weight"] ) )
+                jobs.append(p)
+                p.start()
+            for proc in jobs:
+                proc.join()
+            sumScore = 0.0
+            sumWts = 0.0
+            for key, (score, wt) in returnDict.items():
+                #print( "{:50s}{:.4f}".format( key, score ) )
+                sumScore += score * score * wt
+                sumWts += wt
+            pathwayScore = np.sqrt( sumScore / sumWts )
+            sumPathwayScore += pathwayScore
+            numPathways += 1
+            if args.verbose or args.hidePlot:
+                print( "{:12s} {:.4f}   ".format( pathName, pathwayScore ), end = "" )
+        meanPathwayScore = sumPathwayScore / numPathways if numPathways > 0 else -1.0
+        if args.verbose or args.hidePlot:
+            print( "\nLevel {:<3d} Score = {:.4f}".format( idx + 1, meanPathwayScore ) )
+        totScore += meanPathwayScore
         numTot += 1
-        if args.verbose or not args.hidePlot:
-            print( "{:20s} Score = {:.3f}".format( blockName, pathwayScore ) )
     return totScore / numTot if numTot > 0 else -1.0
 
             #ret.append( pool.apply_async( findSim.innerMain, (fname,), dict( modelFile = model, mapFile = mapfile, hidePlot = False, silent = not args.verbose  ), callback = logResult ) )
