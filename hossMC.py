@@ -71,7 +71,7 @@ class Monte:
         self.cumulativeScore = cumulativeScore
         self.rankScore = self.score
         #self.rankScore = (self.score + self.cumulativeScore * self.level) / (self.level + 1)
-        #print( "making Monte {}.{}.{}.{}".format( pathway, fname, imm, ii))
+        #print( "making Monte {}.{}.{}.{}@{:.3f}".format( pathway, fname, imm, ii, score))
 
     def __lt__( self, other ):
         return self.score < other.score
@@ -89,12 +89,19 @@ class Row():
         self.idx = list(idx)
         self.tot = 0.0
         for dd, ii in zip( self.data, idx ):
+            if len( dd ) <= ii:
+                raise( "Row init: len(dd)=={} < ii == {}".format( len(dd), ii) )
             self.tot += dd[ ii ]
+        #print( "ROW: ", idx, self.tot )
 
     def print( self ):
+        print( "RR= ", self.idx, self.tot )
+        '''
+        print( "Lidx = {}, Lnames = {}, Ldata = {}".format( len(self.idx), len( self.names ), len( self.data ) ) )
         for ii, nn, dd in zip( self.idx, self.names, self.data ):
             print( "{}  {:<8.1f}".format( nn, dd[ii] ), end = "" )
         print( "{:8.1f}".format( self.tot ) )
+        '''
 
     def __lt__( self, other ):
         if self.tot < other.tot:
@@ -121,12 +128,13 @@ def buildTopNList( pathwayScores, num ):
     sortedMonte = {}
     # first get top N = num for each pathway.
     for key, val in pathwayScores.items():
-        sortedMonte[key] = sorted( val )[:num]
-        #print( "topN: L1 = {}, L2 = {}".format( len( val ), len( set( val ) ) ) )
+        sortedMonte[key] = sorted( val )[:num*2]
     # Then do algorithm for best num.
 
     topNames = sorted( sortedMonte )
     topData = [ [ss.rankScore for ss in sortedMonte[nn]] for nn in topNames]
+    Row.data = topData
+    Row.names = topNames
 
     if len( topNames ) == 1:
         name = topNames[0]
@@ -137,19 +145,30 @@ def buildTopNList( pathwayScores, num ):
         svec = []
 
         while( len( svec ) < num ):
-            #print( len( vec ), len( svec ), len( topData ), len( topData[0]) )
+            #print( len( vec ), len(svec), len(topData), len( topData[0]) )
             rr = heapq.heappop( vec )
-            #print( "RR = ", rr )
-            if len( vec ) > 0 and not rr == vec[0]:
+            #rr.print()
+            if ( len(vec) == 0 ) or ( (len(vec) > 0) and not rr == vec[0] ):
+                '''
+                print( "LENS = ", len( rr.idx ), len( sortedMonte ) )
+                for ii, nn in enumerate( topNames ):
+                    print( "ENTRY = {}, {}  {}, lsm = {}, {}".format( nn, ii, rr.idx[ii], len( sortedMonte ), len( sortedMonte[nn] ) ) )
+                '''
                 entry = { nn:sortedMonte[nn][rr.idx[ii]] for ii, nn in enumerate( topNames ) }   
-                #print( "ENTRY = {}, {}  {}".format( nn, ii, rr.idx[ii] ) )
                 svec.append( entry )
             for ii in range( len( topData ) ):
                 idx2 = list(rr.idx)
                 idx2[ii] += 1
-                #print( " pushing in idx2", idx2 )
                 heapq.heappush( vec, Row( idx2 ) )
 
+    '''
+    for idx, ss in enumerate( svec ):
+        stot = 0.0
+        for nn, val in ss.items():
+            print( "{}: {} = {:.3f}".format( idx, nn, val.score ), end = "    " )
+            stot += val.score
+        print( "Tot = {:.3f}".format( stot ) )
+    '''
     return svec
 
 ########################################################################
@@ -638,13 +657,14 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
             for name, ob in optBlock.items():
                 monte = tt[name]
                 rmsScore += monte.score * monte.score
-                startModel = monte.fname.replace ( "MONTE", "OPTIMIZED" )
                 if firstBlock:
+                    startModel = monte.fname.replace ( "MONTE", "OPTIMIZED" )
                     shutil.copyfile( startModel, outputModel )
                     #print( "Copyfile ", startModel, "       ", outputModel )
                 else:
                     scramParam.mergeModels( startModel, mapFile, monte.fname.replace( "MONTE", "OPTIMIZED" ), outputModel, ob["params"] )
                 firstBlock = False
+                startModel = monte.fname.replace ( "MONTE", "OPTIMIZED" )
                 #print( "CumulativeScore for {} = {:.3f}".format(outputModel, monte.cumulativeScore ) )
 
             rmsScore = np.sqrt( rmsScore / len( optBlock )  )
