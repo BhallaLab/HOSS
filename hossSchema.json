@@ -1,17 +1,54 @@
 {
 	"type": "object",
 	"properties": {
-		"FileType": {"type": "string"},
-		"Version": {"type": "string"},
+		"FileType": {"enum": ["Hoss", "HOSS", "hoss"]},
+		"Version": {"pattern": "[2-9].*"},
 		"author": {"type": "string"},
 		"model": {"type": "string"},
-		"map": {"type": "string"},
+		"map": {"pattern": "^.+\\.(json|JSON)$" },
 		"exptDir": {"type": "string"},
 		"outputDir": {"type": "string"},
 		"scoreFunc": {"type": "string"},
-		"tolerance": {"type": "number"},
+		"tolerance": {"type": "number", "minimum": 1e-7},
 		"algorithm": {"type": "string"},
 		"comment": { "type": "string" },
+		"hossMethod": { "type": "object",
+			"properties": {
+				"type": {"enum": ["hoss", "flat", "initScram", "hossMC"] }
+			},
+			"if": {
+				"type": "object",
+				"properties": {
+					"type": {"const": "initScram"}
+				},
+				"required": ["type"]
+			},
+			"then": {
+				"properties": {
+					"numInitSamples": {"type": "number"},
+					"scrambleRange": {"type": "number"}
+				},
+				"required": ["numInitSamples", "scrambleRange"]
+			},
+			"if": {
+				"type": "object",
+				"properties": {
+					"type": {"const": "hossMC"}
+				},
+				"required": ["type"]
+			},
+			"then": {
+				"properties": {
+					"numInitSamples": {"type": "number"},
+					"scrambleRange": {"type": "number"},
+					"numTopSolutions": {"type": "number" },
+					"numNextLevel": { "type": "number" }
+				},
+				"required": ["numInitSamples", "scrambleRange",
+					"numTopSolutions", "numNextLevel"]
+			},
+			"unevaluatedProperties": false
+		},
 		"HOSS" : {"type": "array",
 			"items": {"type": "object",
 				"properties": {
@@ -59,6 +96,7 @@
 			}
 		}
 	},
-	"required": ["model", "map", "HOSS", "scoreFunc", "tolerance", "algorithm"],
+	"required": ["FileType", "Version", "model", "map", "HOSS", "scoreFunc", "tolerance", "algorithm", "hossMethod"],
 	"additionalProperties": false
+
 }
