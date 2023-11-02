@@ -14,38 +14,39 @@
 		"comment": { "type": "string" },
 		"hossMethod": { "type": "object",
 			"properties": {
-				"type": {"enum": ["hoss", "flat", "initScram", "hossMC"] }
+				"method": {"enum": ["hoss", "flat", "initScram", "hossMC"]},
+				"numProcesses": {"type": "number", "minimum": 1}
 			},
 			"if": {
 				"type": "object",
 				"properties": {
-					"type": {"const": "initScram"}
+					"method": {"const": "initScram"}
 				},
-				"required": ["type"]
+				"required": ["method"]
 			},
 			"then": {
 				"properties": {
-					"numInitSamples": {"type": "number"},
+					"numInitScramble": {"type": "number"},
 					"scrambleRange": {"type": "number"}
 				},
-				"required": ["numInitSamples", "scrambleRange"]
+				"required": ["numInitScramble", "scrambleRange"]
 			},
 			"if": {
 				"type": "object",
 				"properties": {
-					"type": {"const": "hossMC"}
+					"method": {"const": "hossMC"}
 				},
-				"required": ["type"]
+				"required": ["method"]
 			},
 			"then": {
 				"properties": {
-					"numInitSamples": {"type": "number"},
+					"numInitScramble": {"type": "number"},
 					"scrambleRange": {"type": "number"},
-					"numTopSolutions": {"type": "number" },
-					"numNextLevel": { "type": "number" }
+					"numTopModels": {"type": "number" },
+					"numScramble": { "type": "number" }
 				},
-				"required": ["numInitSamples", "scrambleRange",
-					"numTopSolutions", "numNextLevel"]
+				"required": ["numInitScramble", "scrambleRange",
+					"numTopModels", "numScramble"]
 			},
 			"unevaluatedProperties": false
 		},

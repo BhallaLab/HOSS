@@ -336,9 +336,12 @@ def loadConfig( args ):
             "model": "./Models/model.json",
             "map": "./Maps/map.json",
             "filePrefix": "",
-            "scramRange": 2,
-            "numScram": 0,
-            "numTopModels": 0
+            "method": "hoss",
+            "scrambleRange": 2,
+            "numScramble": 0,
+            "numInitScramble": 0,
+            "numTopModels": 0,
+            "numProcesses": 0
         } 
     baseargs = vars( args )
     for key, val in requiredDefaultArgs.items():
@@ -346,6 +349,9 @@ def loadConfig( args ):
             continue
         elif key in config: # Specified in Config file
             baseargs[key] = config[key]
+        elif key in config["hossMethod"]:
+            baseargs[key] = config["hossMethod"][key]
+            #print( "basargs[key]=", key, baseargs[key] )
         else:               # Fall back to default.
             baseargs[key] = val
 
@@ -369,14 +375,14 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
         numProcesses = max( multiprocessing.cpu_count()//8, 1)
 
     pool = multiprocessing.Pool( processes = numProcesses )
-    scramRange = baseargs["scramRange"]
+    scramRange = baseargs["scrambleRange"]
     sname = "{}{}.{}".format( prefix, scramModelName, modelFileSuffix )
     scramParam.generateScrambled( origModel, baseargs["map"], sname, 
-            baseargs["numInitScram"], None, scramRange )
+            baseargs["numInitScramble"], None, scramRange )
 
     pool = multiprocessing.Pool( processes = numProcesses )
     ret = []
-    for ii in range( baseargs["numInitScram"] ):
+    for ii in range( baseargs["numInitScramble"] ):
         newargs = dict( baseargs )
         newargs["model"] = "{}{}_{:03d}.{}".format( prefix, 
             scramModelName, ii, modelFileSuffix )
@@ -562,8 +568,8 @@ def wrapMultiParamMinimizer( name, optBlock, baseargs ):
 def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     origModel = baseargs['model'] # Use for loading model
     mapFile = baseargs['map'] # Use for loading model
-    scramRange = baseargs["scramRange"]
-    numScram = baseargs["numScram"]
+    scramRange = baseargs["scrambleRange"]
+    numScram = baseargs["numScramble"]
     numTopModels = baseargs["numTopModels"]
     modelFileSuffix = origModel.split( "." )[-1]
     scramModelName = "scram"
@@ -585,9 +591,9 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
         hierarchyLevel = idx + 1
         pathwayScores = {}        
         optBlock = {}
-        if idx == 0 and baseargs["numInitScram"] > 0: 
+        if idx == 0 and baseargs["numInitScramble"] > 0: 
             # Starting level, we have a single model to scramble
-            numScramPerModel = baseargs["numInitScram"]
+            numScramPerModel = baseargs["numInitScramble"]
         else:
             numScramPerModel = numScram // len(startModelList)
         #print( "startModelList =  ", startModelList )
@@ -629,7 +635,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
                             imm, ii, modelFileSuffix )
                     #print( "BASEARGS = ", baseargs["model"] )
                     #newScore = runJson( name, ob, baseargs )
-                    if numProcesses == 1:
+                    if numProcesses <= 1:
                         #print( "start single proc, t={:.3f} ".format( time.time() - t0  ) )
                         threadRet.append( ( multi_param_minimization.runJson( name, ob, baseargs ), baseargs["model"] ) )
                     else:
@@ -692,14 +698,15 @@ def main( args ):
     parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files.' )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-fp', '--filePrefix', type = str, help='Optional: Prefix to add to names of optfile and resultFile. Can also be a directory path.', default = "" )
+    parser.add_argument( '-meth', '--method', type = str, help='Optimization method: one of hoss, flat, initScram or hossMC. Default = hoss' )
     parser.add_argument( '-p', '--parallel', type = str, help='Optional: Define parallelization model. Options: serial, MPI, threads. Defaults to serial. MPI not yet implemented', default = "serial" )
     parser.add_argument( '-n', '--numProcesses', type = int, help='Optional: Number of blocks to run in parallel, when we are not in serial mode. Note that each block may have multiple experiments also running in parallel. Default is to take numCores/8.', default = 0 )
-    parser.add_argument( '-ns', '--numScram', type = int, help='Optional: Number of Monte Carlo samples to take by scrambling files. By default no Monte Carlo sampling will be done', default = 0 )
+    parser.add_argument( '-ns', '--numScramble', type = int, help='Optional: Number of Monte Carlo samples to take by scrambling files. By default no Monte Carlo sampling will be done', default = 0 )
     parser.add_argument( '-nt', '--numTopModels', type = int, help='Optional: For Monte Carlo, number of models out of score-sorted set, to take to next stage of optimization to use as starting points for further scrambling. By default no Monte Carlo sampling will be done.', default = 0 )
-    parser.add_argument( '-ni', '--numInitScram', type = int, help='Optional: Number of initial models to generate by scrambling all parameters of initial model file. Each one of these scrambled models will then be used as the start point for a full, non-MC optimization. By default no scrambling will be done. Each optimization will be run on a different thread, up to the limit set by numProcesses. If set, this overrides numScram and numTopModels options.', default = 0 )
+    parser.add_argument( '-ni', '--numInitScramble', type = int, help='Optional: Number of initial models to generate by scrambling all parameters of initial model file. Each one of these scrambled models will then be used as the start point for a full, non-MC optimization. By default no scrambling will be done. Each optimization will be run on a different thread, up to the limit set by numProcesses. If set, this overrides numScram and numTopModels options.', default = 0 )
     parser.add_argument( '-r', '--resultFile', type = str, help='Optional: File name for saving results of optimizations as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation. Default: NRMS' )
-    parser.add_argument( '-scr', '--scramRange', type = float, help='Optional, used only when doing Monte Carlo sampling: Range for scrambling model parameters. Default: 2.0', default = 2.0 )
+    parser.add_argument( '-scr', '--scrambleRange', type = float, help='Optional, used only when doing Monte Carlo sampling: Range for scrambling model parameters. Default: 2.0', default = 2.0 )
     parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "LSODA".')
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     parser.add_argument( '-st', '--show_ticker', action="store_true", help="Flag: default False. Prints out ticker as optimization progresses.")
@@ -708,15 +715,22 @@ def main( args ):
     baseargs, config = loadConfig( args )
     blocks = config["HOSS"]
 
-    if baseargs["numScram"] == 0 or baseargs["numTopModels"] == 0:
-        if baseargs["numInitScram"] > 0:
+    if baseargs["method"] in ["hoss", "flat"]:
+        if baseargs["numInitScramble"] > 0:
+            raise( "numInitScramble should be 0 in regular hoss optimization" )
+        runOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
+    elif baseargs["method"] == "initScram":
+        if baseargs["numInitScramble"] >= 5:
             runInitScramThenOptimize( blocks, baseargs, t0 )
         else:
-            runOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
-    elif baseargs["numScram"] > 0 and baseargs["numTopModels"] > 0:
-        # This optionally uses numInitScram for the first set of samples,
-        # if it is defined. Else uses numScram
-        runMCoptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
+            raise( "numInitScramble be >= 5 in initScram optimization" )
+    elif baseargs["method"] == "hossMC":
+        if baseargs["numScramble"] >= 5 and baseargs["numTopModels"] > 0 and baseargs["numInitScramble"] >= 5:
+            runMCoptimizer(blocks, baseargs, args.parallel, args.blocks, t0)
+        else:
+            raise( "numInitScramble and numScramble  should be >= 5 and numTopModels > 0 in hossMC optimization" )
+    else:
+        assert( 0 )
 
 
 #######################################################################
