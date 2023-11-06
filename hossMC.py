@@ -414,6 +414,68 @@ def insertFileIdx( fname, idx ):
     [fpre, fext] = os.path.splitext( fname )
     return "{}_{:03d}{}".format( fpre, idx, fext )
 
+def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0, 
+        idx = None ):
+    origModel = baseargs['model'] # Use for loading model
+    modelFileSuffix = origModel.split( "." )[-1]
+    results = []
+    intermed = []
+    flatPathway = {
+        "comment": "This is the flattened pathway with all expts", 
+        "resultFile": baseargs['resultFile'],
+        "optModelFile": baseargs['optfile'],
+        "expt": {},
+        "params": [],
+        "paramBounds": {}
+    }
+
+    for hossLevel in blocks: # Assume blocks are in order of execution.
+        optBlock = {}
+        hl = hossLevel["hierarchyLevel"]
+        # Specify intermediate model and result files
+        baseargs['optfile'] = "./_optModel{}.{}".format(hl, modelFileSuffix)
+        baseargs['resultFile'] = "./_optResults{}.txt".format( hl )
+        for key, val in hossLevel.items():
+            if key == "name" or key == "hierarchyLevel":
+                continue
+            # Either run all items or run named items in block.
+            #print( "Args.blocks = ", args.blocks, "     Key = ", key )
+            if blocksToRun == [] or key in blocksToRun:
+                flatPathway["expt"].update( val["expt"] )
+                flatPathway["params"].extend( val["params"] )
+                pb = val.get("paramBounds")
+                if pb:
+                    flatPathway["paramBounds"].update( pb )
+
+    flatBlock = {
+        #"name": "all", 
+        #"hierarchyLevel": 1, 
+        "flatPathway": flatPathway 
+    }
+
+
+    # Now we have a block to optimize, use suitable method to run it.
+    # We can run items in a block in any order, but the whole block
+    # must be wrapped up before we go to the next level of heirarchy.
+    t1 = time.time()
+    if parallelMode == "serial":
+        score = runOptSerial( flatBlock, baseargs )
+    elif parallelMode == "threads":
+        score = runOptThreads( flatBlock, baseargs )
+    elif parallelMode == "MPI":
+        score = runOptMPI( flatBlock, baseargs )
+    t2 = time.time()
+    # This saves the scores and the intermediate opt file, to use for
+    # next level of optimization.
+    ret = processIntermediateResults( score, baseargs, 1, t2 - t1 )
+    t1 = t2
+    intermed.append( ret )
+    baseargs["model"] = baseargs["filePrefix"] + baseargs["optfile"] # Apply heirarchy to opt
+    results.append( score )
+    flatBlock[ "name" ] =  "all"
+    flatBlock[ "hierarchyLevel" ] =  1
+    newblocks = [flatBlock]
+    return computeModelScores( newblocks, baseargs, time.time() - t0 )
 
 def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0, 
         idx = None ):
@@ -718,7 +780,10 @@ def main( args ):
     if baseargs["method"] in ["hoss", "flat"]:
         if baseargs["numInitScramble"] > 0:
             raise( "numInitScramble should be 0 in regular hoss optimization" )
+    if baseargs["method"] == "hoss":
         runOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
+    elif baseargs["method"] == "flat":
+        runFlatOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
     elif baseargs["method"] == "initScram":
         if baseargs["numInitScramble"] >= 5:
             runInitScramThenOptimize( blocks, baseargs, t0 )
