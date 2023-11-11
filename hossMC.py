@@ -211,15 +211,15 @@ def combineScores( eret ):
         return 0.0, 0.0
     else:
         """
-        """
         print( "----> IS={:.3f}   FS={:.3f}, finalSum={:.3f}, numSum={:.3f}".format( 
             pow( initSum / numSum, 1.0/ScorePow ), 
             pow( finalSum / numSum, 1.0/ScorePow ), 
             finalSum, numSum ), flush = True )
+        """
         return pow( initSum / numSum, 1.0/ScorePow ), pow( finalSum / numSum, 1.0/ScorePow )
 
 
-def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
+def processIntermediateResults( retvec, baseargs, levelIdx, t0, idx=None ):
     prefix = baseargs["filePrefix"]
     fp = open( prefix + baseargs["resultFile"], "w" )
     optfile = prefix + baseargs["optfile"]
@@ -237,7 +237,8 @@ def processIntermediateResults( retvec, baseargs, levelIdx, t0 ):
     if not math.isclose( totScore, totAltScore, rel_tol = 1e-3, abs_tol = 1e-6 ):
         print( "Warning: Score mismatch in processIntermediateResults: ", totScore, totAltScore )
     if __name__ == "__main__":
-        print( "Level {} ------- Init Score: {:.3f}   OptimizedScore {:.3f}       Time: {:.3f} s\n".format( levelIdx, totInitScore / len( retvec ), totAltScore / len( retvec ), t0 ) )
+        lstr = "" if idx == None else "{:03d}.".format( idx )
+        print( "Level {}{} --- Init Score: {:.3f}   OptimizedScore {:.3f}       Time: {:.3f} s".format( lstr, levelIdx, totInitScore / len( retvec ), totAltScore / len( retvec ), t0 ) )
 
     fnames = { "model": baseargs["model"], "optfile": optfile, "map": baseargs["map"], "resultFile": prefix + baseargs["resultFile"] }
     pargs = []
@@ -360,13 +361,11 @@ def loadConfig( args ):
             "numInitScramble": 0,
             "numTopModels": 0,
             "numProcesses": 0,
-            "timeout": 300
+            "timeout": None
         } 
     baseargs = vars( args )
     for key, val in requiredDefaultArgs.items():
         if baseargs[key]:   # command line arg given
-            if key == "timeout":
-                print( "TIMEOUT = ", baseargs[key] )
             continue
         elif key in config: # Specified in Config file
             baseargs[key] = config[key]
@@ -392,9 +391,10 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
     modelFileSuffix = origModel.split( "." )[-1]
     scramModelName = "scram"
     prefix = baseargs["scramDir"]
+    if prefix and (prefix[-1] != "/"):
+        prefix = prefix + "/"
     numProcesses = baseargs["numProcesses"]
     numInitScramble = baseargs["numInitScramble"]
-    print( "BUILDING RUN STATUS" )
     runStatus = [ RunStatus( ii ) for ii in range( numInitScramble ) ]
     if numProcesses == 0:
         numProcesses = max( multiprocessing.cpu_count()//8, 1)
@@ -402,43 +402,43 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
     pool = multiprocessing.Pool( processes = numProcesses )
     scramRange = baseargs["scrambleRange"]
     sname = "{}{}.{}".format( prefix, scramModelName, modelFileSuffix )
+    print( "PREFIX = ", prefix, "   SNAME = ", sname )
     scramParam.generateScrambled( origModel, baseargs["map"], sname, 
             numInitScramble, None, scramRange )
 
     pool = multiprocessing.Pool( processes = numProcesses )
     ret = []
-    print( "Starting to farm out scrambles: ", time.time() - t0 )
+    #print( "Starting to farm out scrambles: ", time.time() - t0 )
     startTimes = [t0] * numInitScramble
     for ii in range( numInitScramble ):
-        newargs = dict( baseargs )
+        # Need to redo each iter because model is updated
+        newargs = dict( baseargs ) 
         newargs["model"] = "{}{}_{:03d}.{}".format( prefix, 
             scramModelName, ii, modelFileSuffix )
-
         runStatus[ii].startTime = time.time()
-        ret.append( pool.apply_async( wrapRunOptimizer, args = ( blocks, newargs, ii, startTimes ), callback = handleFinishedRun ) )
-        print( "Farmed", ii, " at time ", time.time() - t0 )
+        ret.append( pool.apply_async( wrapRunOptimizer, args = ( blocks, newargs, ii, t0 ), callback = ticker ) )
+        #print( "Farmed", ii, " at time ", time.time() - t0 )
     score = []
-    pollHoss( ret, runStatus, baseargs )
+    #pollHoss( ret, runStatus, baseargs )
 
 
-    '''
     for idx, rr in enumerate( ret ):
         try:
-            newTimeout = max( timeout-( time.time()-startTimes[idx] ), 0.1 )
-            print( "to get {} at time {:.3f}; startTime = {:.3f}, newTimout = {:.3f}".format( idx, time.time() - t0, time.time() - startTimes[idx], newTimeout ), flush = True )
-            score.append( rr.get( timeout ) )
-            print( "got {} at time {:.3f}; startTime = {:.3f}, newTimout = {:.3f}".format( idx, time.time() - t0, time.time() - startTimes[idx], newTimeout ), flush = True )
+            #print( "to get {} at time {:.3f}; startTime = {:.3f}".format( idx, time.time() - t0, time.time() - startTimes[idx] ), flush = True )
+            score.append( rr.get() )
+            #print( "got {} at time {:.3f}; startTime = {:.3f}".format( idx, time.time() - t0, time.time() - startTimes[idx] ), flush = True )
         except multiprocessing.TimeoutError:
             if baseargs["verbose"]:
-                print( "Warning: Timeout in runInitScramThenOptimize. Skipping number ", idx )
-            #timeout = 0.1 # Once one has timed out, don't do further waits.
-        else:
-            print( "appended score for ", idx )
-    '''
+                print( "Warning: Timeout in runInitScramThenOptimize. Skipping number ", idx, flush = True )
+            score.append( None )
 
     # Do something with lots of scores.
     for scramIdx, scramVal in enumerate( score ):    
         totScore = 0.0
+        if scramVal == None:
+            print( "final Score for scramIdx {:03d} in {} = None".format(
+                scramIdx, baseargs["model"] ) )
+            continue
         for level, ss in enumerate( scramVal ):
             # Each level contains a scoreDict of { pathway: score }
             pathwayScore = 0.0
@@ -453,15 +453,13 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
 
     return score
 
-def wrapRunOptimizer( blocks, baseargs, idx, startTimes ):
-    # I cannot assign runStatus.startTime here as it is on a separate thread
-    global runStatus
-    startTimes[idx] = time.time()
-    print( "Launching wrapRunOptimizer at time = ", time.time() - startTimes[idx], "    IDX = ", idx, "st =",  runStatus[idx].startTime )
+def wrapRunOptimizer( blocks, baseargs, idx, t0 ):
+    print( "Launching wrapRunOptimizer {} at time = {:.3f} for {} ".format( idx, time.time() - t0, baseargs["model"] ) )
     currProc = multiprocessing.current_process()
     currProc.daemon = False  # This allows nested multiprocessing.
     return runOptimizer( blocks, baseargs, "serial", [], time.time(), idx )
 
+'''
 def handleFinishedRun( ret ):
     global runStatus
     idx = ret[-1]
@@ -469,7 +467,9 @@ def handleFinishedRun( ret ):
     print( "Callback for initScram run for idx ", idx, runStatus[idx].startTime, runStatus[idx].idx )
     runStatus[idx].justFinished = True
     runStatus[idx].endTime = time.time()
+'''
 
+'''
 def pollHoss( ret, runStatus, baseargs ):
     timeout = baseargs["timeout"]
     numFinished = 0
@@ -514,6 +514,7 @@ def pollHoss( ret, runStatus, baseargs ):
                     numFinished += 1
         print( "    ", numFinished )
         time.sleep(1)   # Let the jobs get on with it.
+'''
 
 #######################################################################
 
@@ -629,14 +630,14 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         t2 = time.time()
         # This saves the scores and the intermediate opt file, to use for
         # next level of optimization.
-        ret = processIntermediateResults( score, baseargs, hl, t2 - t1 )
+        ret = processIntermediateResults( score, baseargs, hl, t2 - t1, idx)
         t1 = t2
         intermed.append( ret )
         baseargs["model"] = baseargs["filePrefix"] + baseargs["optfile"] # Apply heirarchy to opt
         results.append( score )
     ret = computeModelScores( blocks, baseargs, time.time() - t0 )
-    if idx != None:
-        ret.append( idx )   # Hack to tell system which initScram run ended
+    #if idx != None:
+    #    ret.append( idx )   # Hack to tell system which initScram run ended
     return ret
     #processFinalResults( results, baseargs, intermed, time.time() - t0  )
 
@@ -900,7 +901,7 @@ def main( args ):
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation. Default: NRMS' )
     parser.add_argument( '-scr', '--scrambleRange', type = float, help='Optional, used only when doing Monte Carlo sampling: Range for scrambling model parameters. Default: 2.0', default = 2.0 )
     parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "LSODA".')
-    parser.add_argument( '-to', '--timeout', type = float, help='Optional. TimeOut to stop optimization run which is taking too long. Default: 300.0' )
+    parser.add_argument( '-to', '--timeout', type = float, help='Optional. TimeOut in seconds to stop optimization run which is taking too long. Default:No timeout' )
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     parser.add_argument( '-st', '--show_ticker', action="store_true", help="Flag: default False. Prints out ticker as optimization progresses.")
     args = parser.parse_args( args )
