@@ -10,6 +10,7 @@
 		"outputDir": {"type": "string"},
 		"scoreFunc": {"type": "string"},
 		"tolerance": {"type": "number", "minimum": 1e-7},
+		"timeout": {"type": "number", "minimum": 0.1, "default": 300 },
 		"algorithm": {"type": "string"},
 		"comment": { "type": "string" },
 		"hossMethod": { "type": "object",
@@ -26,8 +27,12 @@
 			},
 			"then": {
 				"properties": {
+					"freezeParams": {"type": "array",
+						"items": {"type": "string" }
+					},
 					"numInitScramble": {"type": "number"},
-					"scrambleRange": {"type": "number"}
+					"scrambleRange": {"type": "number"},
+					"scramDir": {"type": "string"}
 				},
 				"required": ["numInitScramble", "scrambleRange"]
 			},
@@ -40,10 +45,14 @@
 			},
 			"then": {
 				"properties": {
+					"freezeParams": {"type": "array",
+						"items": {"type": "string" }
+					},
 					"numInitScramble": {"type": "number"},
 					"scrambleRange": {"type": "number"},
 					"numTopModels": {"type": "number" },
-					"numScramble": { "type": "number" }
+					"numScramble": { "type": "number" },
+					"scramDir": {"type": "string"}
 				},
 				"required": ["numInitScramble", "scrambleRange",
 					"numTopModels", "numScramble"]
