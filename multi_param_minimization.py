@@ -50,6 +50,7 @@ import math
 import time
 import json
 import findSim
+import multiprocessing
 from multiprocessing import Pool
 
 defaultScoreFunc = "NRMS"
@@ -206,7 +207,7 @@ def dumbTicker( result ):
     #sys.stdout.flush()
 
 class EvalFunc:
-    def __init__( self, params, bounds, expts, pool, modelFile, mapFile, verbose, showTicker = True, solver = "gsl" ):
+    def __init__( self, params, bounds, expts, pool, modelFile, mapFile, verbose, showTicker = True, solver = "gsl", timeout = None ):
         # params specified as list of strings of form object.field 
         self.params = params
         # paramBounds specified as list of Bounds objects
@@ -218,6 +219,8 @@ class EvalFunc:
         self.verbose = verbose # bool
         self.showTicker = showTicker
         self.solver = solver
+        self.timeout = timeout
+        self.startTime = time.time()
         self.numCalls = 0
         self.numIter = 0
         self.score = []
@@ -244,6 +247,9 @@ class EvalFunc:
         ret = []
         paramList = []
         boundsPenalty = 1.0     # It is a scaling factor.
+        if self.timeout and time.time() > (self.timeout + self.startTime):
+            # Bounce out of the entire optimizer, should catch in HOSS.
+            raise( multiprocessing.TimeoutError( "multi_param_minimization timeout for: " + self.modelFile ) )
 
         if len( x ) > 0:
             if len(x) != len( self.params ):
@@ -420,7 +426,7 @@ def runJson( optName, optDict, args, isVerbose = False ):
     else:
         paramBounds = {}
 
-    ret = innerMain( paramArgs, expts, args["model"], args["map"], isVerbose, tolerance, showTicker = args["show_ticker"], algorithm = algorithm, paramBounds = paramBounds, solver = solver )
+    ret = innerMain( paramArgs, expts, args["model"], args["map"], isVerbose, tolerance, showTicker = args["show_ticker"], algorithm = algorithm, paramBounds = paramBounds, solver = solver, timeout = args["timeout"] )
     return ret + ( paramArgs, )
     
 def extractStatus():
@@ -499,7 +505,7 @@ def findInitialParams( expts, modelFile, mapFile, paramArgs, solver ):
     return initParams
 
 
-def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "SLSQP", paramBounds = {}, solver = "gsl" ):
+def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "SLSQP", paramBounds = {}, solver = "gsl", timeout = None ):
     global ev
     t0 = time.time()
     pool = Pool( processes = len( expts ) )
@@ -536,7 +542,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     #print( "INIT  = ", [i for i in initParams ])
     #print( "BOUNDS = ", [ (b.lo, b.hi) for b in bounds] )
     #print( "------------------------------------------------" )
-    ev = EvalFunc( params, bounds, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker, solver = solver )
+    ev = EvalFunc( params, bounds, expts, pool, modelFile, mapFile, isVerbose, showTicker = showTicker, solver = solver, timeout = timeout )
     # Generate the score for each expt for the initial condition
     ret = ev.doEval( [] )
     if ret < -0.1: # Got a negative score, ie, run failed somewhere.
