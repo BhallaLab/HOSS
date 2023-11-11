@@ -60,6 +60,8 @@ ScorePow = 2.0
 
 HOSS_SCHEMA = "hossSchema.json"
 
+runStatus = []
+
 class Monte:
     def __init__(self, pathway, fname, imm, ii, level, score, cumulativeScore ):
         self.pathway = pathway
@@ -82,6 +84,7 @@ class Monte:
     def __hash__( self ):
         return hash( self.fname + str( self.startModelIdx ) + str( self.scramModelIdx ) + str( self.level ) )
 
+#########################################################################
 class Row():
     data = []
     names = []
@@ -90,7 +93,7 @@ class Row():
         self.tot = 0.0
         for dd, ii in zip( self.data, idx ):
             if len( dd ) <= ii:
-                raise( "Row init: len(dd)=={} < ii == {}".format( len(dd), ii) )
+                raise ValueError( "Row init: len(dd)=={} < ii == {}".format( len(dd), ii) )
             self.tot += dd[ ii ]
         #print( "ROW: ", idx, self.tot )
 
@@ -113,7 +116,18 @@ class Row():
     def __eq__( self, other ):
         return self.idx == other.idx
 
+#########################################################################
+class RunStatus():
+    def __init__( self, idx ):
+        self.finished = False
+        self.justFinished = False
+        self.startTime = 0.0
+        self.endTime = 0.0
+        self.timedOut = False
+        self.scores = None
+        self.idx = idx
 
+#########################################################################
 def buildTopNList( pathwayScores, num ):
     '''
     Generates a sorted list of dicts: ret[rank][pathway_name]
@@ -274,14 +288,6 @@ def runOptSerial( optBlock, baseargs ):
 def ticker( arg ):
     return
 
-'''
-def threadProc( name, ob, baseargs ):
-    currProc = multiprocessing.current_process()
-    currProc.daemon = False  # This allows nested multiprocessing.
-    #print( "\n", name, ob, "\n###########################################" )
-    return multi_param_minimization.runJson(name, ob, baseargs )
-'''
-
 def runOptThreads( optBlock, baseargs ):
     numProcesses = baseargs["numProcesses"]
     if numProcesses == 0:
@@ -292,7 +298,15 @@ def runOptThreads( optBlock, baseargs ):
     ret = []
     for name, ob in optBlock.items():
         ret.append( pool.apply_async( wrapMultiParamMinimizer, args = ( name, ob, baseargs ), callback = ticker ) )
-    score = [rr.get() for rr in ret ]
+    score = []
+    timeout = baseargs["timeout"]
+    for rr in ret:
+        try:
+            score.append(rr.get( timeout ) )
+        except multiprocessing.TimeoutError:
+            if baseargs["verbose"]:
+                print( "Warning: Timeout in runOptThreads. Skipping pathway")
+                timeout = 0.1
 
     #print( "Thread SCORE = ", [ss[0].fun for ss in score] )
     return score
@@ -327,12 +341,16 @@ def loadConfig( args ):
     # requiredDefaultArgs is set here in case neither the config file nor 
     # the command line has the argument. We can't use default args in 
     # argparser as this would override the config file.
+    # We can't use default args in hossSchema because this doesn't create
+    # any absent key:val, it is just an annotation.
     requiredDefaultArgs = { 
             "tolerance": 0.001, 
             "scoreFunc": "NRMS", 
             "algorithm": "SLSQP", 
             "solver": "LSODA", 
             "exptDir": "./Expts" ,
+            "outputDir": "./OPTIMIZED" ,
+            "scramDir": "./SCRAM" ,
             "model": "./Models/model.json",
             "map": "./Maps/map.json",
             "filePrefix": "",
@@ -341,11 +359,14 @@ def loadConfig( args ):
             "numScramble": 0,
             "numInitScramble": 0,
             "numTopModels": 0,
-            "numProcesses": 0
+            "numProcesses": 0,
+            "timeout": 300
         } 
     baseargs = vars( args )
     for key, val in requiredDefaultArgs.items():
         if baseargs[key]:   # command line arg given
+            if key == "timeout":
+                print( "TIMEOUT = ", baseargs[key] )
             continue
         elif key in config: # Specified in Config file
             baseargs[key] = config[key]
@@ -366,11 +387,15 @@ def loadConfig( args ):
 
 #######################################################################
 def runInitScramThenOptimize( blocks, baseargs, t0 ):
+    global runStatus
     origModel = baseargs['model'] # Use for loading model
     modelFileSuffix = origModel.split( "." )[-1]
     scramModelName = "scram"
-    prefix = "MONTE/"
+    prefix = baseargs["scramDir"]
     numProcesses = baseargs["numProcesses"]
+    numInitScramble = baseargs["numInitScramble"]
+    print( "BUILDING RUN STATUS" )
+    runStatus = [ RunStatus( ii ) for ii in range( numInitScramble ) ]
     if numProcesses == 0:
         numProcesses = max( multiprocessing.cpu_count()//8, 1)
 
@@ -378,16 +403,39 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
     scramRange = baseargs["scrambleRange"]
     sname = "{}{}.{}".format( prefix, scramModelName, modelFileSuffix )
     scramParam.generateScrambled( origModel, baseargs["map"], sname, 
-            baseargs["numInitScramble"], None, scramRange )
+            numInitScramble, None, scramRange )
 
     pool = multiprocessing.Pool( processes = numProcesses )
     ret = []
-    for ii in range( baseargs["numInitScramble"] ):
+    print( "Starting to farm out scrambles: ", time.time() - t0 )
+    startTimes = [t0] * numInitScramble
+    for ii in range( numInitScramble ):
         newargs = dict( baseargs )
         newargs["model"] = "{}{}_{:03d}.{}".format( prefix, 
             scramModelName, ii, modelFileSuffix )
-        ret.append( pool.apply_async( wrapRunOptimizer, args = ( blocks, newargs, ii ), callback = ticker ) )
-    score = [ rr.get() for rr in ret ]
+
+        runStatus[ii].startTime = time.time()
+        ret.append( pool.apply_async( wrapRunOptimizer, args = ( blocks, newargs, ii, startTimes ), callback = handleFinishedRun ) )
+        print( "Farmed", ii, " at time ", time.time() - t0 )
+    score = []
+    pollHoss( ret, runStatus, baseargs )
+
+
+    '''
+    for idx, rr in enumerate( ret ):
+        try:
+            newTimeout = max( timeout-( time.time()-startTimes[idx] ), 0.1 )
+            print( "to get {} at time {:.3f}; startTime = {:.3f}, newTimout = {:.3f}".format( idx, time.time() - t0, time.time() - startTimes[idx], newTimeout ), flush = True )
+            score.append( rr.get( timeout ) )
+            print( "got {} at time {:.3f}; startTime = {:.3f}, newTimout = {:.3f}".format( idx, time.time() - t0, time.time() - startTimes[idx], newTimeout ), flush = True )
+        except multiprocessing.TimeoutError:
+            if baseargs["verbose"]:
+                print( "Warning: Timeout in runInitScramThenOptimize. Skipping number ", idx )
+            #timeout = 0.1 # Once one has timed out, don't do further waits.
+        else:
+            print( "appended score for ", idx )
+    '''
+
     # Do something with lots of scores.
     for scramIdx, scramVal in enumerate( score ):    
         totScore = 0.0
@@ -405,10 +453,69 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
 
     return score
 
-def wrapRunOptimizer( blocks, baseargs, idx ):
+def wrapRunOptimizer( blocks, baseargs, idx, startTimes ):
+    # I cannot assign runStatus.startTime here as it is on a separate thread
+    global runStatus
+    startTimes[idx] = time.time()
+    print( "Launching wrapRunOptimizer at time = ", time.time() - startTimes[idx], "    IDX = ", idx, "st =",  runStatus[idx].startTime )
     currProc = multiprocessing.current_process()
     currProc.daemon = False  # This allows nested multiprocessing.
     return runOptimizer( blocks, baseargs, "serial", [], time.time(), idx )
+
+def handleFinishedRun( ret ):
+    global runStatus
+    idx = ret[-1]
+    assert( idx < len( runStatus ) )
+    print( "Callback for initScram run for idx ", idx, runStatus[idx].startTime, runStatus[idx].idx )
+    runStatus[idx].justFinished = True
+    runStatus[idx].endTime = time.time()
+
+def pollHoss( ret, runStatus, baseargs ):
+    timeout = baseargs["timeout"]
+    numFinished = 0
+    while numFinished < len( ret ):
+        numFinished = 0
+        for idx in range( len(ret) ):
+            rs = runStatus[idx]
+            if rs.timedOut:
+                print( "t", end = "" )
+            elif not rs.finished:
+                if rs.startTime > 0:
+                    print( "r", end = "" )
+                else:
+                    print( ".", end = "" )
+            else:
+                print( "f", end = "" )
+            if rs.finished:
+                numFinished += 1
+                continue
+            if rs.startTime == 0: # Not yet launched.
+                continue
+            if rs.justFinished:
+                rs.scores = ret[idx].get( 0.1 )[:-1] #Get it right away
+                rs.justFinished = False
+                rs.finished = True
+                numFinished += 1
+                continue
+            if time.time() - rs.startTime > timeout:
+                try:
+                    rs.scores = ret[idx].get( 0.1 ) # Kill it right away
+                    # What happens if it completes in this short window?
+                except multiprocessing.TimeoutError:
+                    rs.timedOut = True
+                    rs.scores = None
+                    if baseargs["verbose"]:
+                        print( "Warning: Timeout in runInitScramThenOptimize. Skipping number ", idx )
+                else:   # Completed in the short time-window.
+                    # The callback will deal with the endTime assignment.
+                    rs.scores = rs.scores[:-1]
+                    rs.finished = True
+                finally:
+                    numFinished += 1
+        print( "    ", numFinished )
+        time.sleep(1)   # Let the jobs get on with it.
+
+#######################################################################
 
 def insertFileIdx( fname, idx ):
     [fpre, fext] = os.path.splitext( fname )
@@ -527,7 +634,10 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         intermed.append( ret )
         baseargs["model"] = baseargs["filePrefix"] + baseargs["optfile"] # Apply heirarchy to opt
         results.append( score )
-    return computeModelScores( blocks, baseargs, time.time() - t0 )
+    ret = computeModelScores( blocks, baseargs, time.time() - t0 )
+    if idx != None:
+        ret.append( idx )   # Hack to tell system which initScram run ended
+    return ret
     #processFinalResults( results, baseargs, intermed, time.time() - t0  )
 
 def worker( baseargs, exptFile ):
@@ -563,7 +673,7 @@ def computeModelScores( blocks, baseargs, runtime ):
             if expt:
                 exptList = sorted( [ ee for ee in expt ] )
             else:
-                raise( "Missing Expt list in pathway " + expt )
+                raise KeyError( "Missing Expt list in pathway " + expt )
             if len( exptList ) == 1:
                 pathwayScore = worker( baseargs, ed + exptList[0] )
                 meanPathwayScore += pathwayScore
@@ -574,12 +684,19 @@ def computeModelScores( blocks, baseargs, runtime ):
                     ret.append( pool.apply_async(worker, args = (baseargs, ed + ee) ) )
                 sumScore = 0.0
                 sumWts = 0.0
+                timeout = baseargs["timeout"]
                 for rr, ee in zip( ret, exptList ):
-                    score = rr.get()
-                    #print( score )
-                    wt = expt[ee]["weight"]
-                    sumScore += score * score * wt
-                    sumWts += wt
+                    try:
+                        score = rr.get( timeout )
+                        #print( score )
+                    except multiprocessing.TimeoutError:
+                        if baseargs["verbose"]:
+                            print( "computeModelScores: timeoutError. Skipping: ", ee )
+                        timeout = 0.1
+                    else:
+                        wt = expt[ee]["weight"]
+                        sumScore += score * score * wt
+                        sumWts += wt
                 pathwayScore = np.sqrt( sumScore / sumWts )
                 meanPathwayScore += pathwayScore
                 numPathways += 1
@@ -598,7 +715,11 @@ def computeModelScores( blocks, baseargs, runtime ):
 #######################################################################
 ## Stuff for MC optimizer
 
-def analyzeMCthreads( name, modelNum, hierarchyLevel, threadRet, numProcesses, pathwayScores, mapFile ):
+def analyzeMCthreads( name, modelNum, hierarchyLevel, threadRet, numProcesses, pathwayScores, baseargs ):
+    mapFile = baseargs["map"]
+    scramDir = baseargs["scramDir"]
+    outputDir = baseargs["outputDir"]
+    timeout = baseargs["timeout"]
     for ii, rr in enumerate( threadRet ):
         # rr[0] is the return scores array, rr[1] is baseargs["model"]
         # scores array is ( results, eret, time.time, paramArgs )
@@ -606,17 +727,24 @@ def analyzeMCthreads( name, modelNum, hierarchyLevel, threadRet, numProcesses, p
         # eret =[{ "expt":e[0], "weight":1, "score": ret, "initScore": 0} for e in ev.expts ]
         if numProcesses == 1:
             score = rr[0]
+            initScore, newScore = combineScores( score[1] )
             #print( "single proc" )
         else:
             #print( "num proc = ", numProcesses )
-            score = rr[0].get()
-        initScore, newScore = combineScores( score[1] )
+            try:
+                score = rr[0].get( timeout )
+            except multiprocessing.TimeoutError:
+                if baseargs["verbose"]:
+                    print( "analyzeMCthreads: timeoutError. Skipping: ",ii )
+                timeout = 0.1
+            else:
+                initScore, newScore = combineScores( score[1] )
         print( ".", end = "", flush=True)
         pathwayScores[name].append( 
                 Monte( name, rr[1], modelNum, ii, 
                 hierarchyLevel, 
                 newScore, 0.0 ) )
-        optfile = rr[1].replace( "MONTE", "OPTIMIZED" )
+        optfile = rr[1].replace( scramDir, outputDir )
         fnames = { "model": rr[1], "optfile": optfile, "map": mapFile, "resultFile": "resultFile" }
         
         multi_param_minimization.saveTweakedModelFile( {}, score[3], score[0]["x"], fnames )
@@ -635,7 +763,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     numTopModels = baseargs["numTopModels"]
     modelFileSuffix = origModel.split( "." )[-1]
     scramModelName = "scram"
-    prefix = "MONTE/"
+    prefix = baseargs['scramDir']
     intermed = []
     results = []
     numProcesses = baseargs["numProcesses"]
@@ -703,7 +831,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
                     else:
                         #print( "start multi proc. num proc = {}, t = {:.3f}".format( numProcesses, time.time() - t0) )
                         threadRet.append( ( pool.apply_async( wrapMultiParamMinimizer, args = ( name, ob, dict( baseargs ) ), callback = ticker ), baseargs["model"] ) )
-                analyzeMCthreads( name, imm, hierarchyLevel, threadRet, numProcesses, pathwayScores, baseargs["map"] )
+                analyzeMCthreads( name, imm, hierarchyLevel, threadRet, numProcesses, pathwayScores, baseargs )
 
         if len( optBlock ) == 0:
             continue        # Nothing to see here, move along to next level
@@ -726,13 +854,13 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
                 monte = tt[name]
                 rmsScore += monte.score * monte.score
                 if firstBlock:
-                    startModel = monte.fname.replace ( "MONTE", "OPTIMIZED" )
+                    startModel = monte.fname.replace( baseargs["scramDir"], baseargs["outputDir"] )
                     shutil.copyfile( startModel, outputModel )
                     #print( "Copyfile ", startModel, "       ", outputModel )
                 else:
-                    scramParam.mergeModels( startModel, mapFile, monte.fname.replace( "MONTE", "OPTIMIZED" ), outputModel, ob["params"] )
+                    scramParam.mergeModels( startModel, mapFile, monte.fname.replace( baseargs["scramDir"], baseargs["outputDir"] ), outputModel, ob["params"] )
                 firstBlock = False
-                startModel = monte.fname.replace ( "MONTE", "OPTIMIZED" )
+                startModel = monte.fname.replace ( baseargs["scramDir"], baseargs["outputDir"] )
                 #print( "CumulativeScore for {} = {:.3f}".format(outputModel, monte.cumulativeScore ) )
 
             rmsScore = np.sqrt( rmsScore / len( optBlock )  )
@@ -757,7 +885,9 @@ def main( args ):
     parser.add_argument( '-b', '--blocks', nargs='*', default=[],  help='Blocks to execute within the JSON file. Defaults to empty, in which case all of them are executed. Each block is the string identifier for the block in the JSON file.' )
     parser.add_argument( '-m', '--model', type = str, help='Optional: Composite model definition file. First searched in directory "location", then in current directory.' )
     parser.add_argument( '-map', '--map', type = str, help='Model entity mapping file. This is a JSON file.' )
-    parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files.' )
+    parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files. Default = "./Expts"' )
+    parser.add_argument( '-od', '--outputDir', type = str, help='Optional: Location of output/optimized files. Default = "./OPTIMIZED"' )
+    parser.add_argument( '-sd', '--scramDir', type = str, help='Optional: Location of scrambled model files. Default = "./SCRAM"' )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-fp', '--filePrefix', type = str, help='Optional: Prefix to add to names of optfile and resultFile. Can also be a directory path.', default = "" )
     parser.add_argument( '-meth', '--method', type = str, help='Optimization method: one of hoss, flat, initScram or hossMC. Default = hoss' )
@@ -770,6 +900,7 @@ def main( args ):
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation. Default: NRMS' )
     parser.add_argument( '-scr', '--scrambleRange', type = float, help='Optional, used only when doing Monte Carlo sampling: Range for scrambling model parameters. Default: 2.0', default = 2.0 )
     parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "LSODA".')
+    parser.add_argument( '-to', '--timeout', type = float, help='Optional. TimeOut to stop optimization run which is taking too long. Default: 300.0' )
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     parser.add_argument( '-st', '--show_ticker', action="store_true", help="Flag: default False. Prints out ticker as optimization progresses.")
     args = parser.parse_args( args )
@@ -779,7 +910,7 @@ def main( args ):
 
     if baseargs["method"] in ["hoss", "flat"]:
         if baseargs["numInitScramble"] > 0:
-            raise( "numInitScramble should be 0 in regular hoss optimization" )
+            raise ValueError( "numInitScramble should be 0 in regular hoss optimization" )
     if baseargs["method"] == "hoss":
         runOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
     elif baseargs["method"] == "flat":
@@ -788,12 +919,12 @@ def main( args ):
         if baseargs["numInitScramble"] >= 5:
             runInitScramThenOptimize( blocks, baseargs, t0 )
         else:
-            raise( "numInitScramble be >= 5 in initScram optimization" )
+            raise ValueError( "numInitScramble must be >= 5 in initScram optimization" )
     elif baseargs["method"] == "hossMC":
         if baseargs["numScramble"] >= 5 and baseargs["numTopModels"] > 0 and baseargs["numInitScramble"] >= 5:
             runMCoptimizer(blocks, baseargs, args.parallel, args.blocks, t0)
         else:
-            raise( "numInitScramble and numScramble  should be >= 5 and numTopModels > 0 in hossMC optimization" )
+            raise ValueError( "numInitScramble and numScramble  should be >= 5 and numTopModels > 0 in hossMC optimization" )
     else:
         assert( 0 )
 
