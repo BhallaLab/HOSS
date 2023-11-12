@@ -303,11 +303,10 @@ def runOptThreads( optBlock, baseargs ):
     timeout = baseargs["timeout"]
     for rr in ret:
         try:
-            score.append(rr.get( timeout ) )
+            score.append(rr.get() )
         except multiprocessing.TimeoutError:
             if baseargs["verbose"]:
                 print( "Warning: Timeout in runOptThreads. Skipping pathway")
-                timeout = 0.1
 
     #print( "Thread SCORE = ", [ss[0].fun for ss in score] )
     return score
@@ -402,7 +401,7 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
     pool = multiprocessing.Pool( processes = numProcesses )
     scramRange = baseargs["scrambleRange"]
     sname = "{}{}.{}".format( prefix, scramModelName, modelFileSuffix )
-    print( "PREFIX = ", prefix, "   SNAME = ", sname )
+    #print( "PREFIX = ", prefix, "   SNAME = ", sname )
     scramParam.generateScrambled( origModel, baseargs["map"], sname, 
             numInitScramble, None, scramRange )
 
@@ -589,6 +588,7 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         idx = None ):
     origModel = baseargs['model'] # Use for loading model
     modelFileSuffix = origModel.split( "." )[-1]
+    outputDir = baseargs["outputDir"]
     results = []
     intermed = []
 
@@ -602,9 +602,9 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
             if key == "name" or key == "hierarchyLevel":
                 continue
             if "optModelFile" in val:
-                baseargs['optfile'] = val["optModelFile"]
+                baseargs['optfile'] = outputDir + "/" + val["optModelFile"]
             if "resultFile" in val:
-                baseargs['resultFile'] = val["resultFile"]
+                baseargs['resultFile'] = outputDir + "/" + val["resultFile"]
 
             if idx != None: # Assign index to the optimization file names.
                 baseargs['optfile'] = insertFileIdx( baseargs['optfile'], idx )
@@ -685,15 +685,13 @@ def computeModelScores( blocks, baseargs, runtime ):
                     ret.append( pool.apply_async(worker, args = (baseargs, ed + ee) ) )
                 sumScore = 0.0
                 sumWts = 0.0
-                timeout = baseargs["timeout"]
                 for rr, ee in zip( ret, exptList ):
                     try:
-                        score = rr.get( timeout )
+                        score = rr.get()
                         #print( score )
                     except multiprocessing.TimeoutError:
                         if baseargs["verbose"]:
-                            print( "computeModelScores: timeoutError. Skipping: ", ee )
-                        timeout = 0.1
+                            print( "computeModelScores: timeoutError. Skipping: ", ee, flush = True )
                     else:
                         wt = expt[ee]["weight"]
                         sumScore += score * score * wt
@@ -720,12 +718,13 @@ def analyzeMCthreads( name, modelNum, hierarchyLevel, threadRet, numProcesses, p
     mapFile = baseargs["map"]
     scramDir = baseargs["scramDir"]
     outputDir = baseargs["outputDir"]
-    timeout = baseargs["timeout"]
     for ii, rr in enumerate( threadRet ):
         # rr[0] is the return scores array, rr[1] is baseargs["model"]
         # scores array is ( results, eret, time.time, paramArgs )
         # results.x is the solution vector
         # eret =[{ "expt":e[0], "weight":1, "score": ret, "initScore": 0} for e in ev.expts ]
+        optfile = rr[1].replace( scramDir, outputDir )
+        fnames = { "model": rr[1], "optfile": optfile, "map": mapFile, "resultFile": "resultFile" }
         if numProcesses == 1:
             score = rr[0]
             initScore, newScore = combineScores( score[1] )
@@ -733,22 +732,23 @@ def analyzeMCthreads( name, modelNum, hierarchyLevel, threadRet, numProcesses, p
         else:
             #print( "num proc = ", numProcesses )
             try:
-                score = rr[0].get( timeout )
+                score = rr[0].get()
             except multiprocessing.TimeoutError:
                 if baseargs["verbose"]:
-                    print( "analyzeMCthreads: timeoutError. Skipping: ",ii )
-                timeout = 0.1
+                    print( "analyzeMCthreads: timeoutError. Skipping: ",ii, rr[1], flush = True )
+                newScore = 1.0e9    # Ensure it is never used for next set
+                # Copy the source file to the output file as a dummy.
+                shutil.copyfile( rr[1], optfile )
             else:
                 initScore, newScore = combineScores( score[1] )
+                multi_param_minimization.saveTweakedModelFile( {}, score[3], score[0]["x"], fnames )
+
         print( ".", end = "", flush=True)
         pathwayScores[name].append( 
-                Monte( name, rr[1], modelNum, ii, 
-                hierarchyLevel, 
-                newScore, 0.0 ) )
-        optfile = rr[1].replace( scramDir, outputDir )
-        fnames = { "model": rr[1], "optfile": optfile, "map": mapFile, "resultFile": "resultFile" }
+            Monte( name, rr[1], modelNum, ii, 
+            hierarchyLevel, 
+            newScore, 0.0 ) )
         
-        multi_param_minimization.saveTweakedModelFile( {}, score[3], score[0]["x"], fnames )
 
 
 def wrapMultiParamMinimizer( name, optBlock, baseargs ):
@@ -765,6 +765,8 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     modelFileSuffix = origModel.split( "." )[-1]
     scramModelName = "scram"
     prefix = baseargs['scramDir']
+    if prefix and (prefix[-1] != "/"):
+        prefix = prefix + "/"
     intermed = []
     results = []
     numProcesses = baseargs["numProcesses"]
@@ -807,6 +809,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
 
             for imm, (mm, score) in enumerate( startModelList ):
                 sname = "{}{}_{}_{}.{}".format( prefix, scramModelName, name, imm, modelFileSuffix )
+                # print ( "mm = ", mm, "      SNAME = ", sname, "  Num=", numScramPerModel )
                 scramParam.generateScrambled( mm, mapFile, sname, numScramPerModel, paramList, scramRange )
                 # Here we put in the starting model as it may be best
                 if imm == 0:
@@ -862,11 +865,8 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
                     scramParam.mergeModels( startModel, mapFile, monte.fname.replace( baseargs["scramDir"], baseargs["outputDir"] ), outputModel, ob["params"] )
                 firstBlock = False
                 startModel = monte.fname.replace ( baseargs["scramDir"], baseargs["outputDir"] )
-                #print( "CumulativeScore for {} = {:.3f}".format(outputModel, monte.cumulativeScore ) )
 
             rmsScore = np.sqrt( rmsScore / len( optBlock )  )
-            #newCumulativeScore = (rmsScore + monte.cumulativeScore * monte.level)/(monte.level + 1 )
-            #startModelList.append( (outputModel, newCumulativeScore  ) )
             startModelList.append( (outputModel, rmsScore  ) )
 
     # Finally compute the end score. It should be a lot better.
