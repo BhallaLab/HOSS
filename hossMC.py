@@ -354,6 +354,7 @@ def loadConfig( args ):
             "model": "./Models/model.json",
             "map": "./Maps/map.json",
             "filePrefix": "",
+            "freezeParams": None,
             "method": "hoss",
             "scrambleRange": 2,
             "numScramble": 0,
@@ -403,7 +404,9 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
     sname = "{}{}.{}".format( prefix, scramModelName, modelFileSuffix )
     #print( "PREFIX = ", prefix, "   SNAME = ", sname )
     scramParam.generateScrambled( origModel, baseargs["map"], sname, 
-            numInitScramble, None, scramRange )
+            numInitScramble, None, scramRange, 
+            freezeParams = baseargs["freezeParams"],
+            ignoreMissingFreeze = True )
 
     pool = multiprocessing.Pool( processes = numProcesses )
     ret = []
@@ -810,7 +813,10 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
             for imm, (mm, score) in enumerate( startModelList ):
                 sname = "{}{}_{}_{}.{}".format( prefix, scramModelName, name, imm, modelFileSuffix )
                 # print ( "mm = ", mm, "      SNAME = ", sname, "  Num=", numScramPerModel )
-                scramParam.generateScrambled( mm, mapFile, sname, numScramPerModel, paramList, scramRange )
+                scramParam.generateScrambled( mm, mapFile, sname, 
+                    numScramPerModel, paramList, scramRange, 
+                    freezeParams = baseargs['freezeParams'],
+                    ignoreMissingFreeze = True )
                 # Here we put in the starting model as it may be best
                 if imm == 0:
                     ss = origScores[idx][name]
@@ -884,6 +890,7 @@ def main( args ):
     parser.add_argument( '-t', '--tolerance', type = float, help='Optional: Tolerance criterion for completion of minimization' )
     parser.add_argument( '-a', '--algorithm', type = str, help='Optional: Algorithm name to use, from the set available to scipy.optimize.minimize. Options are CG, Nelder-Mead, Powell, BFGS, COBYLA, SLSQP, trust-constr. The library has other algorithms but they either require Jacobians or they fail outright. There is also L-BFGS-B which handles bounded solutions, but this is not needed here because we already take care of bounds. SLSQP works well and is the default.' )
     parser.add_argument( '-b', '--blocks', nargs='*', default=[],  help='Blocks to execute within the JSON file. Defaults to empty, in which case all of them are executed. Each block is the string identifier for the block in the JSON file.' )
+    parser.add_argument( '-freeze', '--freezeParams', nargs='*', help='Space-separated list of parameters (specified as obj.field) to be frozen when doing the parameter scrambling.' )
     parser.add_argument( '-m', '--model', type = str, help='Optional: Composite model definition file. First searched in directory "location", then in current directory.' )
     parser.add_argument( '-map', '--map', type = str, help='Model entity mapping file. This is a JSON file.' )
     parser.add_argument( '-e', '--exptDir', type = str, help='Optional: Location of experiment files. Default = "./Expts"' )
