@@ -92,7 +92,17 @@ def validateConfig( args ):
 
             with open( fs ) as _schema:
                 schema = json.load( _schema )
-                jsonschema.validate( config, schema )
+                try:
+                    jsonschema.validate( config, schema )
+                except jsonschema.exceptions.ValidationError as err:
+                    print( "HOSS config validation error" )
+                    print( "Error msg: ", err.message )
+                    print( "Validator instance: ", err.validator )
+                    print( "Validator value: ", err.validator_value )
+                    print( "Context: ", err.context )
+                    print( "Schema path: ", err.schema_path )
+                    quit()
+
     except IOError:
         print( "Error: Unable to find HOSS config file: " + args.config )
         quit()
