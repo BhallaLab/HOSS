@@ -16,48 +16,60 @@
 		"hossMethod": { "type": "object",
 			"properties": {
 				"method": {"enum": ["hoss", "flat", "initScram", "hossMC"]},
-				"numProcesses": {"type": "number", "minimum": 1}
-			},
-			"if": {
-				"type": "object",
-				"properties": {
-					"method": {"const": "initScram"}
+				"numProcesses": {"type": "number", "minimum": 1},
+				"freezeParams": {"type": "array",
+					"items": {"type": "string" }
 				},
-				"required": ["method"]
+				"numInitScramble": {"type": "number"},
+				"scrambleRange": {"type": "number"},
+				"numTopModels": {"type": "number" },
+				"numScramble": { "type": "number" },
+				"scramDir": {"type": "string"}
 			},
-			"then": {
-				"properties": {
-					"freezeParams": {"type": "array",
-						"items": {"type": "string" }
+			"oneOf": [
+				{
+					"properties": {
+						"method": {"enum": ["hoss", "flat"]},
+						"numProcesses": {"type": "number", "minimum": 1}
 					},
-					"numInitScramble": {"type": "number"},
-					"scrambleRange": {"type": "number"},
-					"scramDir": {"type": "string"}
+					"required": ["method"],
+					"additionalProperties": false
 				},
-				"required": ["numInitScramble", "scrambleRange"]
-			},
-			"if": {
-				"type": "object",
-				"properties": {
-					"method": {"const": "hossMC"}
-				},
-				"required": ["method"]
-			},
-			"then": {
-				"properties": {
-					"freezeParams": {"type": "array",
-						"items": {"type": "string" }
+				{
+					"properties": {
+						"method": {"const": "initScram"},
+						"numProcesses": {"type": "number", "minimum": 1},
+						"freezeParams": {"type": "array",
+							"items": {"type": "string" }
+						},
+						"numInitScramble": {"type": "number"},
+						"scrambleRange": {"type": "number"},
+						"scramDir": {"type": "string"}
 					},
-					"numInitScramble": {"type": "number"},
-					"scrambleRange": {"type": "number"},
-					"numTopModels": {"type": "number" },
-					"numScramble": { "type": "number" },
-					"scramDir": {"type": "string"}
+					"required": ["method", "numInitScramble", 
+							"scrambleRange"],
+					"additionalProperties": false
 				},
-				"required": ["numInitScramble", "scrambleRange",
-					"numTopModels", "numScramble"]
-			},
-			"unevaluatedProperties": false
+				{
+					"properties": {
+						"method": {"const": "hossMC"},
+						"numProcesses": {"type": "number", "minimum": 1},
+						"freezeParams": {"type": "array",
+							"items": {"type": "string" }
+						},
+						"numInitScramble": {"type": "number"},
+						"scrambleRange": {"type": "number"},
+						"numTopModels": {"type": "number" },
+						"numScramble": { "type": "number" },
+						"scramDir": {"type": "string"}
+					},
+					"required": ["method", "numInitScramble", 
+							"scrambleRange",
+							"numTopModels", "numScramble"],
+					"additionalProperties": false
+				}
+			],
+			"additionalProperties": false
 		},
 		"HOSS" : {"type": "array",
 			"items": {"type": "object",
