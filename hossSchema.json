@@ -85,10 +85,12 @@
 								},
 								"required": ["weight"],
 								"additionalProperties": false
-							}
+							},
+							"minProperties": 1
 						},
 						"params": { "type" : "array",
-								"items": { "type": "string" }
+								"items": { "type": "string" },
+								"minItems": 1
 						},
 						"paramBounds": { "type" : "object",
 							"additionalProperties": { "type": "array",
@@ -103,10 +105,11 @@
 					"required": ["expt", "params"],
 					"additionalProperties": false
 				}
-			}
+			},
+			"minItems": 1
 		}
 	},
-	"required": ["FileType", "Version", "model", "map", "HOSS", "scoreFunc", "tolerance", "algorithm", "hossMethod"],
+	"required": ["FileType", "Version", "author", "model", "map", "HOSS", "scoreFunc", "tolerance", "algorithm", "hossMethod"],
 	"additionalProperties": false
 
 }
