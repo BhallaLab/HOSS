@@ -152,7 +152,7 @@ def buildTopNList( pathwayScores, num ):
 
     if len( topNames ) == 1:
         name = topNames[0]
-        svec = [ {name:mm} for mm in sortedMonte[name] ]
+        svec = [ {name:mm} for mm in sortedMonte[name] ][:num]
     else:
         vec = [Row( [0] * len( topNames ) )]
         heapq.heapify( vec )
@@ -393,6 +393,7 @@ def loadConfig( args ):
 #######################################################################
 def runInitScramThenOptimize( blocks, baseargs, t0 ):
     global runStatus
+    NumTopN = 10
     origModel = baseargs['model'] # Use for loading model
     modelFileSuffix = origModel.split( "." )[-1]
     scramModelName = "scram"
@@ -468,7 +469,7 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
     with open( sortedResults, "w" ) as fp:
         for ss in sortedScoreList:
             fp.write( "{:03d}   {:.4f}\n".format( ss[0], ss[1] ) )
-    for idx, ss in enumerate( sortedScoreList[:10] ):
+    for idx, ss in enumerate( sortedScoreList[:NumTopN] ):
         srcfile = "{}{}_{:03d}.{}".format( outputDir, OptModelFname,
             ss[0], modelFileSuffix )
         destfile = "{}topN_{:03d}.{}".format( outputDir, idx, modelFileSuffix )
