@@ -57,8 +57,8 @@ import multi_param_minimization
 import scramParam
 
 ScorePow = 2.0
-
 HOSS_SCHEMA = "hossSchema.json"
+OptModelFname = "OPTI"
 
 runStatus = []
 
@@ -220,7 +220,9 @@ def combineScores( eret ):
 
 
 def processIntermediateResults( retvec, baseargs, levelIdx, t0, idx=None ):
-    prefix = baseargs["filePrefix"]
+    prefix = baseargs["outputDir"]
+    if len( prefix ) > 0 and prefix[-1] != '/':
+        prefix += "/"
     fp = open( prefix + baseargs["resultFile"], "w" )
     optfile = prefix + baseargs["optfile"]
     #levelIdx = int(optfile[-6:-5]) # Assume we have only levels 0 to 9.
@@ -351,9 +353,10 @@ def loadConfig( args ):
             "exptDir": "./Expts" ,
             "outputDir": "./OPTIMIZED" ,
             "scramDir": "./SCRAM" ,
+            "resultFile": "result.txt",
+            "optfile": "",
             "model": "./Models/model.json",
             "map": "./Maps/map.json",
-            "filePrefix": "",
             "freezeParams": None,
             "method": "hoss",
             "scrambleRange": 2,
@@ -381,6 +384,9 @@ def loadConfig( args ):
     # for the next block.
     assert( 'model' in baseargs )
     assert( 'resultFile' in baseargs )
+    modelFileSuffix = baseargs["model"].split( "." )[-1]
+    if baseargs["optfile"] == "":    # Still empty
+        baseargs["optfile"] = "opt." + modelFileSuffix
 
     return baseargs, config
 
@@ -393,6 +399,9 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
     prefix = baseargs["scramDir"]
     if prefix and (prefix[-1] != "/"):
         prefix = prefix + "/"
+    outputDir = baseargs["outputDir"]
+    if len( outputDir ) > 0 and outputDir[-1] != '/':
+        outputDir += '/'
     numProcesses = baseargs["numProcesses"]
     numInitScramble = baseargs["numInitScramble"]
     runStatus = [ RunStatus( ii ) for ii in range( numInitScramble ) ]
@@ -435,6 +444,7 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
             score.append( None )
 
     # Do something with lots of scores.
+    scoreList = [] # We'll have a list of tuples of (scramIdx, score)
     for scramIdx, scramVal in enumerate( score ):    
         totScore = 0.0
         if scramVal == None:
@@ -451,7 +461,21 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
             totScore += (pathwayScore / len( ss ) if len( ss ) > 0 else 0.0)
         print( "Final Score for scramIdx {:03d} in {} = {:.3f}".format(
             scramIdx, baseargs["model"], totScore / len( scramVal ) ) )
+        scoreList.append( (scramIdx, totScore / len( scramVal ) ) )
+
+    sortedScoreList = sorted( scoreList, key = lambda x: x[1] )
+    sortedResults = "{}sortedResults.txt".format( outputDir )
+    with open( sortedResults, "w" ) as fp:
+        for ss in sortedScoreList:
+            fp.write( "{:03d}   {:.4f}\n".format( ss[0], ss[1] ) )
+    for idx, ss in enumerate( sortedScoreList[:10] ):
+        srcfile = "{}{}_{:03d}.{}".format( outputDir, OptModelFname,
+            ss[0], modelFileSuffix )
+        destfile = "{}topN_{:03d}.{}".format( outputDir, idx, modelFileSuffix )
+        shutil.copyfile( srcfile, destfile )
+
     print( "Total user wallclock time = {:.2f}s".format( time.time() - t0) )
+
 
     return score
 
@@ -460,63 +484,6 @@ def wrapRunOptimizer( blocks, baseargs, idx, t0 ):
     currProc = multiprocessing.current_process()
     currProc.daemon = False  # This allows nested multiprocessing.
     return runOptimizer( blocks, baseargs, "serial", [], time.time(), idx )
-
-'''
-def handleFinishedRun( ret ):
-    global runStatus
-    idx = ret[-1]
-    assert( idx < len( runStatus ) )
-    print( "Callback for initScram run for idx ", idx, runStatus[idx].startTime, runStatus[idx].idx )
-    runStatus[idx].justFinished = True
-    runStatus[idx].endTime = time.time()
-'''
-
-'''
-def pollHoss( ret, runStatus, baseargs ):
-    timeout = baseargs["timeout"]
-    numFinished = 0
-    while numFinished < len( ret ):
-        numFinished = 0
-        for idx in range( len(ret) ):
-            rs = runStatus[idx]
-            if rs.timedOut:
-                print( "t", end = "" )
-            elif not rs.finished:
-                if rs.startTime > 0:
-                    print( "r", end = "" )
-                else:
-                    print( ".", end = "" )
-            else:
-                print( "f", end = "" )
-            if rs.finished:
-                numFinished += 1
-                continue
-            if rs.startTime == 0: # Not yet launched.
-                continue
-            if rs.justFinished:
-                rs.scores = ret[idx].get( 0.1 )[:-1] #Get it right away
-                rs.justFinished = False
-                rs.finished = True
-                numFinished += 1
-                continue
-            if time.time() - rs.startTime > timeout:
-                try:
-                    rs.scores = ret[idx].get( 0.1 ) # Kill it right away
-                    # What happens if it completes in this short window?
-                except multiprocessing.TimeoutError:
-                    rs.timedOut = True
-                    rs.scores = None
-                    if baseargs["verbose"]:
-                        print( "Warning: Timeout in runInitScramThenOptimize. Skipping number ", idx )
-                else:   # Completed in the short time-window.
-                    # The callback will deal with the endTime assignment.
-                    rs.scores = rs.scores[:-1]
-                    rs.finished = True
-                finally:
-                    numFinished += 1
-        print( "    ", numFinished )
-        time.sleep(1)   # Let the jobs get on with it.
-'''
 
 #######################################################################
 
@@ -527,9 +494,13 @@ def insertFileIdx( fname, idx ):
 def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0, 
         idx = None ):
     origModel = baseargs['model'] # Use for loading model
+    outputDir = baseargs["outputDir"]
+    if len( outputDir ) > 0 and outputDir[-1] != '/':
+        outputDir += '/'
     modelFileSuffix = origModel.split( "." )[-1]
     results = []
     intermed = []
+
     flatPathway = {
         "comment": "This is the flattened pathway with all expts", 
         "resultFile": baseargs['resultFile'],
@@ -539,12 +510,16 @@ def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         "paramBounds": {}
     }
 
+    #baseargs['optfile'] = flatPathway['optModelFile']
+    #baseargs['resultFile'] = flatPathway['resultFile']
+    #print( "OUTPUT IN ", baseargs["optfile"], baseargs["resultFile"] )
+
     for hossLevel in blocks: # Assume blocks are in order of execution.
         optBlock = {}
         hl = hossLevel["hierarchyLevel"]
-        # Specify intermediate model and result files
-        baseargs['optfile'] = "./_optModel{}.{}".format(hl, modelFileSuffix)
-        baseargs['resultFile'] = "./_optResults{}.txt".format( hl )
+        # Specify intermediate model and result files in case they are here
+        #baseargs['optfile'] = "{}/_optModel{}.{}".format(outputDir, hl, modelFileSuffix)
+        #baseargs['resultFile'] = "{}/_optResults{}.txt".format( outputDir, hl )
         for key, val in hossLevel.items():
             if key == "name" or key == "hierarchyLevel":
                 continue
@@ -580,7 +555,7 @@ def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     ret = processIntermediateResults( score, baseargs, 1, t2 - t1 )
     t1 = t2
     intermed.append( ret )
-    baseargs["model"] = baseargs["filePrefix"] + baseargs["optfile"] # Apply heirarchy to opt
+    baseargs["model"] = outputDir + baseargs["optfile"] # Apply heirarchy to opt
     results.append( score )
     flatBlock[ "name" ] =  "all"
     flatBlock[ "hierarchyLevel" ] =  1
@@ -592,6 +567,8 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     origModel = baseargs['model'] # Use for loading model
     modelFileSuffix = origModel.split( "." )[-1]
     outputDir = baseargs["outputDir"]
+    if len( outputDir ) > 0 and outputDir[-1] != '/':
+        outputDir += "/"
     results = []
     intermed = []
 
@@ -605,9 +582,11 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
             if key == "name" or key == "hierarchyLevel":
                 continue
             if "optModelFile" in val:
-                baseargs['optfile'] = outputDir + "/" + val["optModelFile"]
+                baseargs['optfile'] = val["optModelFile"]
+                #baseargs['optfile'] = outputDir + "/" + val["optModelFile"]
             if "resultFile" in val:
-                baseargs['resultFile'] = outputDir + "/" + val["resultFile"]
+                baseargs['resultFile'] = val["resultFile"]
+                #baseargs['resultFile'] = outputDir + "/" + val["resultFile"]
 
             if idx != None: # Assign index to the optimization file names.
                 baseargs['optfile'] = insertFileIdx( baseargs['optfile'], idx )
@@ -636,9 +615,11 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         ret = processIntermediateResults( score, baseargs, hl, t2 - t1, idx)
         t1 = t2
         intermed.append( ret )
-        baseargs["model"] = baseargs["filePrefix"] + baseargs["optfile"] # Apply heirarchy to opt
+        baseargs["model"] = outputDir + baseargs["optfile"] # Apply heirarchy to opt
         results.append( score )
     ret = computeModelScores( blocks, baseargs, time.time() - t0 )
+    destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
+    shutil.copyfile( baseargs["model"], outputDir + destfile )
     #if idx != None:
     #    ret.append( idx )   # Hack to tell system which initScram run ended
     return ret
@@ -770,6 +751,9 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     prefix = baseargs['scramDir']
     if prefix and (prefix[-1] != "/"):
         prefix = prefix + "/"
+    outputDir = baseargs["outputDir"]
+    if len( outputDir ) > 0 and outputDir[-1] != '/':
+        outputDir += '/'
     intermed = []
     results = []
     numProcesses = baseargs["numProcesses"]
@@ -859,7 +843,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
         for idx, tt in enumerate( topN ):
             rmsScore = 0.0
             firstBlock = True
-            outputModel = "topN_{}_{:03d}.{}".format( hierarchyLevel, idx, modelFileSuffix )
+            outputModel = "{}topN_{}_{:03d}.{}".format( outputDir, hierarchyLevel, idx, modelFileSuffix )
             for name, ob in optBlock.items():
                 monte = tt[name]
                 rmsScore += monte.score * monte.score
@@ -876,7 +860,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
             startModelList.append( (outputModel, rmsScore  ) )
 
     # Finally compute the end score. It should be a lot better.
-    baseargs["model"] = "topN_{}_{:03d}.{}".format( hierarchyLevel, 0, modelFileSuffix )
+    baseargs["model"] = "{}topN_{}_{:03d}.{}".format( outputDir, hierarchyLevel, 0, modelFileSuffix )
     print()
     finalScores = computeModelScores( blocks, baseargs, time.time() - t0 )
 
@@ -897,7 +881,6 @@ def main( args ):
     parser.add_argument( '-od', '--outputDir', type = str, help='Optional: Location of output/optimized files. Default = "./OPTIMIZED"' )
     parser.add_argument( '-sd', '--scramDir', type = str, help='Optional: Location of scrambled model files. Default = "./SCRAM"' )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
-    parser.add_argument( '-fp', '--filePrefix', type = str, help='Optional: Prefix to add to names of optfile and resultFile. Can also be a directory path.', default = "" )
     parser.add_argument( '-meth', '--method', type = str, help='Optimization method: one of hoss, flat, initScram or hossMC. Default = hoss' )
     parser.add_argument( '-p', '--parallel', type = str, help='Optional: Define parallelization model. Options: serial, MPI, threads. Defaults to serial. MPI not yet implemented', default = "serial" )
     parser.add_argument( '-n', '--numProcesses', type = int, help='Optional: Number of blocks to run in parallel, when we are not in serial mode. Note that each block may have multiple experiments also running in parallel. Default is to take numCores/8.', default = 0 )
