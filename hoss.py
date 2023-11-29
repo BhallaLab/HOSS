@@ -483,9 +483,9 @@ def wrapRunOptimizer( blocks, baseargs, idx, t0 ):
     print( "Launching wrapRunOptimizer {} at time = {:.3f} for {} ".format( idx, time.time() - t0, baseargs["model"] ) )
     currProc = multiprocessing.current_process()
     currProc.daemon = False  # This allows nested multiprocessing.
-    ret, initScore, optScore = runHossOptimizer( blocks, baseargs, 
+    levelScores, initScore, optScore = runHossOptimizer( blocks, baseargs, 
             "serial", [], time.time(), idx )
-    return ret
+    return levelScores
 
 #######################################################################
 
@@ -625,7 +625,7 @@ def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     levelScores, totScore = computeModelScores( blocks, baseargs, time.time() - t0 )
     destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
     shutil.copyfile( baseargs["model"], outputDir + destfile )
-    return ret, initScore, totScore
+    return levelScores, initScore, totScore
 
 def worker( baseargs, exptFile ):
     score, elapsedTime, diagnostics = findSim.innerMain( exptFile, 
@@ -926,14 +926,14 @@ def main( args ):
 
     if baseargs["method"] == "hoss":
         ret, initScore, finalScore = runHossOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
-        print( "{}: hoss opt: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
+        print( "{}: hoss: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
     elif baseargs["method"] == "flat":
         ret, initScore, finalScore = runFlatOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
-        print( "{}: flat opt: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
+        print( "{}: flat: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
     elif baseargs["method"] == "initScram":
         if baseargs["numInitScramble"] >= 5:
             initScore, finalScore = runInitScramThenOptimize( blocks, baseargs, t0 )
-            print( "{}: initScramble opt: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
+            print( "{}: initScramble: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
         else:
             raise ValueError( "numInitScramble must be >= 5 in initScram optimization" )
     elif baseargs["method"] == "hossMC":
