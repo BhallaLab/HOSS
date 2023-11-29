@@ -642,6 +642,8 @@ def computeModelScores( blocks, baseargs, runtime, doPrint = False ):
     nret = 0
     levelScores = []
     totScore = 0.0
+    flatScore = 0.0
+    flatWt = 0.0
     ed = baseargs["exptDir"]
     if len( ed ) > 0 and ed[-1] != "/":
         ed = ed + "/"
@@ -665,6 +667,9 @@ def computeModelScores( blocks, baseargs, runtime, doPrint = False ):
             if len( exptList ) == 1:
                 pathwayScore = worker( baseargs, ed + exptList[0] )
                 meanPathwayScore += pathwayScore
+                wt = expt[exptList[0]]["weight"]
+                flatScore += pathwayScore * pathwayScore * wt
+                flatWt += wt
                 numPathways += 1
             elif len( exptList ) > 1:
                 ret = []
@@ -683,6 +688,8 @@ def computeModelScores( blocks, baseargs, runtime, doPrint = False ):
                         wt = expt[ee]["weight"]
                         sumScore += score * score * wt
                         sumWts += wt
+                        flatScore += score * score * wt
+                        flatWt += wt
                 pathwayScore = np.sqrt( sumScore / sumWts )
                 meanPathwayScore += pathwayScore
                 numPathways += 1
@@ -696,6 +703,11 @@ def computeModelScores( blocks, baseargs, runtime, doPrint = False ):
         mean = meanPathwayScore/numPathways if numPathways > 0 else -1.0
         totScore += mean
         levelScores.append( scoreDict )
+
+    if baseargs["method"] == "flat":
+        # Hack to replace topScore by the equivalent from flatScore.
+        totScore = np.sqrt( flatScore /flatWt ) * len( levelScores )
+
     if doPrint:
         print( "Final Score for {} levels in {} = {:.3f}, Time={:.2f}s".format( len( levelScores ), baseargs["model"], totScore / len( levelScores ), runtime) )
     return levelScores, totScore / len( levelScores )
