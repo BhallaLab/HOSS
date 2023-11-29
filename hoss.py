@@ -393,7 +393,6 @@ def loadConfig( args ):
 #######################################################################
 def runInitScramThenOptimize( blocks, baseargs, t0 ):
     global runStatus
-    NumTopN = 10
     origModel = baseargs['model'] # Use for loading model
     modelFileSuffix = origModel.split( "." )[-1]
     scramModelName = "scram"
@@ -405,9 +404,12 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
         outputDir += '/'
     numProcesses = baseargs["numProcesses"]
     numInitScramble = baseargs["numInitScramble"]
+    NumTopN = min( 10, numInitScramble )
     runStatus = [ RunStatus( ii ) for ii in range( numInitScramble ) ]
     if numProcesses == 0:
         numProcesses = max( multiprocessing.cpu_count()//8, 1)
+
+    origScores, initScore = computeModelScores( blocks, baseargs, 0 )
 
     pool = multiprocessing.Pool( processes = numProcesses )
     scramRange = baseargs["scrambleRange"]
@@ -475,16 +477,15 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
         destfile = "{}topN_{:03d}.{}".format( outputDir, idx, modelFileSuffix )
         shutil.copyfile( srcfile, destfile )
 
-    print( "Total user wallclock time = {:.2f}s".format( time.time() - t0) )
-
-
-    return score
+    return initScore, sortedScoreList[0][1]
 
 def wrapRunOptimizer( blocks, baseargs, idx, t0 ):
     print( "Launching wrapRunOptimizer {} at time = {:.3f} for {} ".format( idx, time.time() - t0, baseargs["model"] ) )
     currProc = multiprocessing.current_process()
     currProc.daemon = False  # This allows nested multiprocessing.
-    return runOptimizer( blocks, baseargs, "serial", [], time.time(), idx )
+    ret, initScore, optScore = runHossOptimizer( blocks, baseargs, 
+            "serial", [], time.time(), idx )
+    return ret
 
 #######################################################################
 
@@ -501,6 +502,7 @@ def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     modelFileSuffix = origModel.split( "." )[-1]
     results = []
     intermed = []
+    origScores, initScore = computeModelScores( blocks, baseargs, 0 )
 
     flatPathway = {
         "comment": "This is the flattened pathway with all expts", 
@@ -561,9 +563,10 @@ def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     flatBlock[ "name" ] =  "all"
     flatBlock[ "hierarchyLevel" ] =  1
     newblocks = [flatBlock]
-    return computeModelScores( newblocks, baseargs, time.time() - t0 )
+    levelScores, totScore = computeModelScores( newblocks, baseargs, time.time() - t0 )
+    return ret, initScore, totScore
 
-def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0, 
+def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0, 
         idx = None ):
     origModel = baseargs['model'] # Use for loading model
     modelFileSuffix = origModel.split( "." )[-1]
@@ -572,6 +575,7 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         outputDir += "/"
     results = []
     intermed = []
+    origScores, initScore = computeModelScores( blocks, baseargs, 0 )
 
     for hossLevel in blocks: # Assume blocks are in order of execution.
         optBlock = {}
@@ -618,13 +622,10 @@ def runOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         intermed.append( ret )
         baseargs["model"] = outputDir + baseargs["optfile"] # Apply heirarchy to opt
         results.append( score )
-    ret = computeModelScores( blocks, baseargs, time.time() - t0 )
+    levelScores, totScore = computeModelScores( blocks, baseargs, time.time() - t0 )
     destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
     shutil.copyfile( baseargs["model"], outputDir + destfile )
-    #if idx != None:
-    #    ret.append( idx )   # Hack to tell system which initScram run ended
-    return ret
-    #processFinalResults( results, baseargs, intermed, time.time() - t0  )
+    return ret, initScore, totScore
 
 def worker( baseargs, exptFile ):
     score, elapsedTime, diagnostics = findSim.innerMain( exptFile, 
@@ -634,7 +635,7 @@ def worker( baseargs, exptFile ):
             solver = "LSODA", plots = False )
     return score
 
-def computeModelScores( blocks, baseargs, runtime ):
+def computeModelScores( blocks, baseargs, runtime, doPrint = False ):
     MIN_BOUND = 1e-10
     MAX_BOUND = 1e6
     ret = 0.0
@@ -648,7 +649,8 @@ def computeModelScores( blocks, baseargs, runtime ):
     pool = multiprocessing.Pool( processes = multiprocessing.cpu_count() )
     for hossLevel in blocks: # Assume blocks are in order of execution.
         lret = 0.0
-        print( "L{} ".format( hossLevel["hierarchyLevel"] ), end = "" )
+        if doPrint:
+            print( "L{} ".format( hossLevel["hierarchyLevel"] ), end = "" )
         meanPathwayScore = 0.0
         numPathways = 0
         scoreDict = {}
@@ -686,14 +688,17 @@ def computeModelScores( blocks, baseargs, runtime ):
                 numPathways += 1
             else:
                 pathwayScore = -1.0
-            print( "{:12s}{:.3f}   ".format(pathway, pathwayScore), end="" )
+            if doPrint:
+                print( "{:12s}{:.3f}   ".format(pathway, pathwayScore), end="" )
             scoreDict[pathway] = pathwayScore
-        print()
+        if doPrint:
+            print()
         mean = meanPathwayScore/numPathways if numPathways > 0 else -1.0
         totScore += mean
         levelScores.append( scoreDict )
-    print( "Final Score for {} levels in {} = {:.3f}, Time={:.2f}s".format( len( levelScores ), baseargs["model"], totScore / len( levelScores ), runtime) )
-    return levelScores
+    if doPrint:
+        print( "Final Score for {} levels in {} = {:.3f}, Time={:.2f}s".format( len( levelScores ), baseargs["model"], totScore / len( levelScores ), runtime) )
+    return levelScores, totScore / len( levelScores )
 
 
 #######################################################################
@@ -764,7 +769,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     t0 = time.time()
 
     # First compute the original score. It may well be better.
-    origScores = computeModelScores( blocks, baseargs, 0 )
+    origScores, initScore = computeModelScores( blocks, baseargs, 0 )
     #quit()
     startModelList = [(origModel, 0.0)] # Model name and score
 
@@ -863,7 +868,14 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     # Finally compute the end score. It should be a lot better.
     baseargs["model"] = "{}topN_{}_{:03d}.{}".format( outputDir, hierarchyLevel, 0, modelFileSuffix )
     print()
-    finalScores = computeModelScores( blocks, baseargs, time.time() - t0 )
+    finalScores, finalTotScore = computeModelScores( blocks, baseargs, time.time() - t0, doPrint = False )
+    print( "{}: hossMC opt: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format(
+        baseargs['optfile'], initScore, finalTotScore, time.time() - t0 ) )
+    for tt in range( numTopN ):
+        baseargs["model"] = "{}topN_{}_{:03d}.{}".format( outputDir, hierarchyLevel, tt, modelFileSuffix )
+        finalScores, finalTotScore = computeModelScores( blocks, baseargs, time.time() - t0, doPrint = False )
+        print( "final Score for topN{:03d} = {:.3f}".format( 
+            tt, finalTotScore ) )
 
 #######################################################################
 
@@ -900,16 +912,16 @@ def main( args ):
     baseargs, config = loadConfig( args )
     blocks = config["HOSS"]
 
-    if baseargs["method"] in ["hoss", "flat"]:
-        if baseargs["numInitScramble"] > 0:
-            raise ValueError( "numInitScramble should be 0 in regular hoss optimization" )
     if baseargs["method"] == "hoss":
-        runOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
+        ret, initScore, finalScore = runHossOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
+        print( "{}: hoss opt: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
     elif baseargs["method"] == "flat":
-        runFlatOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
+        ret, initScore, finalScore = runFlatOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
+        print( "{}: flat opt: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
     elif baseargs["method"] == "initScram":
         if baseargs["numInitScramble"] >= 5:
-            runInitScramThenOptimize( blocks, baseargs, t0 )
+            initScore, finalScore = runInitScramThenOptimize( blocks, baseargs, t0 )
+            print( "{}: initScramble opt: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
         else:
             raise ValueError( "numInitScramble must be >= 5 in initScram optimization" )
     elif baseargs["method"] == "hossMC":
