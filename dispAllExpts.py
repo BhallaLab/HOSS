@@ -102,6 +102,7 @@ def innerMain( args ):
     mapfile = config["map"]
     if args.map != "":
         mapfile = args.map
+    
     b = args.blocks
     blockList = []
     blocks = config["HOSS"]
@@ -132,6 +133,8 @@ def innerMain( args ):
     manager = multiprocessing.Manager()
     totScore = 0.0
     numTot = 0
+    flatScore = 0.0
+    flatWt = 0.0
     for idx, edict in enumerate( blockList ):
         sumPathwayScore = 0.0
         numPathways = 0
@@ -153,6 +156,8 @@ def innerMain( args ):
                 #print( "{:50s}{:.4f}".format( key, score ) )
                 sumScore += score * score * wt
                 sumWts += wt
+                flatScore += score * score * wt
+                flatWt += wt
             pathwayScore = np.sqrt( sumScore / sumWts )
             sumPathwayScore += pathwayScore
             numPathways += 1
@@ -163,7 +168,11 @@ def innerMain( args ):
             print( "\nLevel {:<3d} Score = {:.4f}".format( idx + 1, meanPathwayScore ) )
         totScore += meanPathwayScore
         numTot += 1
-    return totScore / numTot if numTot > 0 else -1.0
+
+    if config["hossMethod"]["method"] == "flat":
+        return np.sqrt( flatScore / flatWt ) if flatWt > 0.0 else -1.0
+    else:
+        return totScore / numTot if numTot > 0 else -1.0
 
             #ret.append( pool.apply_async( findSim.innerMain, (fname,), dict( modelFile = model, mapFile = mapfile, hidePlot = False, silent = not args.verbose  ), callback = logResult ) )
 
