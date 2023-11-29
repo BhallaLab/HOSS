@@ -877,17 +877,20 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
             rmsScore = np.sqrt( rmsScore / len( optBlock )  )
             startModelList.append( (outputModel, rmsScore  ) )
 
+    print()
+    for tt in range( numTopModels ):
+        baseargs["model"] = "{}topN_{}_{:03d}.{}".format( outputDir, hierarchyLevel, tt, modelFileSuffix )
+        finalScores, finalTopnScore = computeModelScores( blocks, baseargs, time.time() - t0, doPrint = False )
+        print( "final Score for topN{:03d} = {:.3f}".format( 
+            tt, finalTopnScore ) )
+
     # Finally compute the end score. It should be a lot better.
     baseargs["model"] = "{}topN_{}_{:03d}.{}".format( outputDir, hierarchyLevel, 0, modelFileSuffix )
-    print()
     finalScores, finalTotScore = computeModelScores( blocks, baseargs, time.time() - t0, doPrint = False )
-    print( "{}: hossMC opt: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format(
-        baseargs['optfile'], initScore, finalTotScore, time.time() - t0 ) )
-    for tt in range( numTopN ):
-        baseargs["model"] = "{}topN_{}_{:03d}.{}".format( outputDir, hierarchyLevel, tt, modelFileSuffix )
-        finalScores, finalTotScore = computeModelScores( blocks, baseargs, time.time() - t0, doPrint = False )
-        print( "final Score for topN{:03d} = {:.3f}".format( 
-            tt, finalTotScore ) )
+    print( "{}: hossMC: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".
+            format( baseargs['optfile'], initScore, finalTotScore, 
+            time.time() - t0 )
+    )
 
 #######################################################################
 
