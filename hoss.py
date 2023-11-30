@@ -564,7 +564,14 @@ def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     flatBlock[ "hierarchyLevel" ] =  1
     newblocks = [flatBlock]
     levelScores, totScore = computeModelScores( newblocks, baseargs, time.time() - t0 )
-    return ret, initScore, totScore
+    destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
+    if initScore < totScore:
+        print( "Warning: flat: init= {:.3f} < final= {:.3f}, algo = {}\nKnown problem with SLSQP. Setting output = input".format( initScore, totScore, baseargs["algorithm"]) )
+        shutil.copyfile( origModel, outputDir + destfile )
+        return levelScores, initScore, initScore
+    else:
+        shutil.copyfile( baseargs["model"], outputDir + destfile )
+    return levelScores, initScore, totScore
 
 def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0, 
         idx = None ):
@@ -624,7 +631,12 @@ def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         results.append( score )
     levelScores, totScore = computeModelScores( blocks, baseargs, time.time() - t0 )
     destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
-    shutil.copyfile( baseargs["model"], outputDir + destfile )
+    if initScore < totScore:
+        print( "Warning: hoss: init= {:.3f} < final= {:.3f}, algo = {}\nKnown problem with SLSQP. Setting output = input".format( initScore, totScore, baseargs["algorithm"]) )
+        shutil.copyfile( origModel, outputDir + destfile )
+        return levelScores, initScore, initScore
+    else:
+        shutil.copyfile( baseargs["model"], outputDir + destfile )
     return levelScores, initScore, totScore
 
 def worker( baseargs, exptFile ):
