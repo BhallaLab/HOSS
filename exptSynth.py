@@ -104,7 +104,11 @@ def runHillTau( model, stimVec, outMols, bufList ):
             quit()
     lastt = 0.0
     mi = model.molInfo[outMols[0]]
+    origConc = []
+    origConcInit = []
     for stim in stimVec:
+        origConc.append( model.conc[stim.molIndex] )
+        origConcInit.append( model.concInit[stim.molIndex] )
         model.conc[ stim.molIndex ] = stim.conc
         model.concInit[ stim.molIndex ] = stim.conc
         model.advance( stim.time - lastt, stim.doSettle )
@@ -120,6 +124,7 @@ def runHillTau( model, stimVec, outMols, bufList ):
     if not stim.doSettle:
         ret = { name:np.array(model.getConcVec( index )) for name, index in outMolIndex.items() }
 
+
     # Unbuffer the reacs
     for i in stimVec:
         si = model.reacInfo.get( i.hillTauMol )
@@ -131,6 +136,10 @@ def runHillTau( model, stimVec, outMols, bufList ):
         ri = model.reacInfo.get( bb["entity"] )
         if ri:
             ri.isBuffered = 0
+
+    # Restore the concs
+    model.conc[stimVec[0].molIndex] = origConc[0]
+    model.concInit[stimVec[0].molIndex] = origConcInit[0]
 
     return ret
 
@@ -420,7 +429,7 @@ def main():
     parser = argparse.ArgumentParser( description = "MOUSE: Model Optimizer Using Synthetic signaling Experiments. Generates FindSim format experiment definitions for time-series and dose-responses for each input/output combination, and optionally pairwise multi-input combinations." )
     parser.add_argument( '-a', '--allReacs', action='store_true', help='Flag: when set, generate all possible 1-step stimulus-readout pairs by scanning through all reactions.')
     parser.add_argument( "-s", "--stimuli", type = str, nargs = '+', metavar = "molName", help = "Optional: Molecules to stimulate, as a list of space-separated names.", default = [])
-    parser.add_argument( "-sr", "--stimulusRange", nargs = 4, metavar = "molName low high duration", help = "Optional: Molecule lowVal highVal duration. Generates a step pulse from low to high with settle, stimulus, and post-stimulus times each equal to _duration_.")
+    parser.add_argument( "-sr", "--stimulusRange", nargs = 4, metavar = "", help = "Optional: Molecule lowVal highVal duration. Generates a step pulse from low to high with settle, stimulus, and post-stimulus times each equal to _duration_.")
     parser.add_argument( "-b", "--buffer", nargs = '+', metavar = "molName conc", help = "Optional: mol conc [mol conc]... List of buffered molecules with their concentration.")
     parser.add_argument( "-r", "--readouts", type = str, nargs = '+', metavar = "molName", help = "Optional: Readout molecules to monitor, as a list of space-separated names.", default = [] )
     parser.add_argument( "-m", "--model", type = str, help = "Optional: Filepath for chemical kinetic model in HillTau or SBML format. If model is not provided the synthetic file just has zeros for predicted output." )
