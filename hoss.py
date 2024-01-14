@@ -483,8 +483,12 @@ def wrapRunOptimizer( blocks, baseargs, idx, t0 ):
     print( "Launching wrapRunOptimizer {} at time = {:.3f} for {} ".format( idx, time.time() - t0, baseargs["model"] ) )
     currProc = multiprocessing.current_process()
     currProc.daemon = False  # This allows nested multiprocessing.
-    levelScores, initScore, optScore = runHossOptimizer( blocks, baseargs, 
-            "serial", [], time.time(), idx )
+    if baseargs["method"] == "initScram":
+        levelScores, initScore, optScore = runHossOptimizer( 
+                blocks, baseargs, "serial", [], time.time(), idx )
+    elif baseargs["method"] == "initScramFlat":
+        levelScores, initScore, optScore = runFlatOptimizer( 
+                blocks, baseargs, "serial", [], time.time(), idx )
     return levelScores
 
 #######################################################################
@@ -921,7 +925,7 @@ def main( args ):
     parser.add_argument( '-od', '--outputDir', type = str, help='Optional: Location of output/optimized files. Default = "./OPTIMIZED"' )
     parser.add_argument( '-sd', '--scramDir', type = str, help='Optional: Location of scrambled model files. Default = "./SCRAM"' )
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
-    parser.add_argument( '-meth', '--method', type = str, help='Optimization method: one of hoss, flat, initScram or hossMC. Default = hoss' )
+    parser.add_argument( '-meth', '--method', type = str, help='Optimization method: one of hoss, flat, initScram, initScramFlat or hossMC. Default = hoss' )
     parser.add_argument( '-p', '--parallel', type = str, help='Optional: Define parallelization model. Options: serial, MPI, threads. Defaults to serial. MPI not yet implemented', default = "serial" )
     parser.add_argument( '-n', '--numProcesses', type = int, help='Optional: Number of blocks to run in parallel, when we are not in serial mode. Note that each block may have multiple experiments also running in parallel. Default is to take numCores/8.', default = 0 )
     parser.add_argument( '-ns', '--numScramble', type = int, help='Optional: Number of Monte Carlo samples to take by scrambling files. By default no Monte Carlo sampling will be done', default = 0 )
@@ -945,7 +949,7 @@ def main( args ):
     elif baseargs["method"] == "flat":
         ret, initScore, finalScore = runFlatOptimizer( blocks, baseargs, args.parallel, args.blocks, t0 )
         print( "{}: flat: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
-    elif baseargs["method"] == "initScram":
+    elif baseargs["method"] in ["initScram", "initScramFlat"]:
         if baseargs["numInitScramble"] >= 5:
             initScore, finalScore = runInitScramThenOptimize( blocks, baseargs, t0 )
             print( "{}: initScramble: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".format( baseargs["model"], initScore, finalScore, time.time() - t0 ) )
