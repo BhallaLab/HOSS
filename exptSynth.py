@@ -421,7 +421,12 @@ def generateDoseExperiment( fname, stimVec, refMol, refVals, settleTime, baselin
     jsonDict["Modifications"]["parameterChange"].extend( baselineList )
     with open( fname, "w" ) as fd:
         json.dump( jsonDict, fd, indent = 4 )
-            
+
+
+def addNoise( readouts, noise ):
+    logNoise = np.log( noise )
+    for key, val in readouts.items():
+        readouts[key] = np.exp( np.log( val ) + np.random.normal(0.0, logNoise) )
 
 def main():
     global plotDt
@@ -433,6 +438,7 @@ def main():
     parser.add_argument( "-b", "--buffer", nargs = '+', metavar = "molName conc", help = "Optional: mol conc [mol conc]... List of buffered molecules with their concentration.")
     parser.add_argument( "-r", "--readouts", type = str, nargs = '+', metavar = "molName", help = "Optional: Readout molecules to monitor, as a list of space-separated names.", default = [] )
     parser.add_argument( "-m", "--model", type = str, help = "Optional: Filepath for chemical kinetic model in HillTau or SBML format. If model is not provided the synthetic file just has zeros for predicted output." )
+    parser.add_argument( "-n", "--noise", type = float, help = "Optional: Noise (as lognorm ratio) for each output point. Default = none." )
     parser.add_argument( "-t", "--tau", type = float, help = "Optional: tau for reaction settling, overrides estimate from model if available. Default = 300 seconds." )
     parser.add_argument( '-f', '--findSimFile', type = str, help='Optional: Base name of FindSim output file, which will be of form <file>_TS_<output>_vs__<input>.json for TimeSeries outputs, and <file>_DR_<output>_vs_<input>.json for the dose-responses. Default = "synth"', default = "synth", metavar = "experiment_file_name" )
     parser.add_argument( '-d', '--dir', type = str, help='Optional: Directory in which to put the output files. If it does not exist it is created. Default is current directory', metavar = "output_directory" )
@@ -531,6 +537,10 @@ def main():
             referenceOutputs = runHillTau( htmodel, stimVec, rlist, bufList)
             htmodel.dt = settleTime
             doserOutputs = runHillTau( htmodel, doseVec, rlist, bufList )
+            if args.noise:
+                assert( args.noise >= 1.0 )
+                addNoise( referenceOutputs, args.noise )
+                addNoise( doserOutputs, args.noise )
         else: 
             referenceOutputs = { rr:np.zeros(1+int(tau*3/plotDt)) for rr in rlist }
             doserOutputs = { rr:np.zeros(len(stimRange)) for rr in rlist }
