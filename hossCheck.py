@@ -266,7 +266,7 @@ def checkMapObjPresentInModel( modelMols, modelmap ):
         with open( "cleanMap.json", "w" ) as mapfile:
             mapfile.write( newMapStr )
             mapfile.write( "\n}\n" )
-        quit()
+        return
     print( "\nValidated mapfile." )
 
 

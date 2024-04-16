@@ -409,7 +409,8 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
     if numProcesses == 0:
         numProcesses = max( multiprocessing.cpu_count()//8, 1)
 
-    origScores, initScore = computeModelScores( blocks, baseargs, 0 )
+    origScores, initScore = computeModelScores( blocks, baseargs, 
+            origModel, 0 )
 
     pool = multiprocessing.Pool( processes = numProcesses )
     scramRange = baseargs["scrambleRange"]
@@ -506,7 +507,8 @@ def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     modelFileSuffix = origModel.split( "." )[-1]
     results = []
     intermed = []
-    origScores, initScore = computeModelScores( blocks, baseargs, 0 )
+    origScores, initScore = computeModelScores( blocks, baseargs, 
+            origModel, 0 )
 
     flatPathway = {
         "comment": "This is the flattened pathway with all expts", 
@@ -567,7 +569,8 @@ def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     flatBlock[ "name" ] =  "all"
     flatBlock[ "hierarchyLevel" ] =  1
     newblocks = [flatBlock]
-    levelScores, totScore = computeModelScores( newblocks, baseargs, time.time() - t0 )
+    levelScores, totScore = computeModelScores( newblocks, baseargs, 
+            origModel, time.time() - t0 )
     destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
     if initScore < totScore:
         print( "Warning: flat: init= {:.3f} < final= {:.3f}, algo = {}\nKnown problem with SLSQP. Setting output = input".format( initScore, totScore, baseargs["algorithm"]) )
@@ -586,7 +589,7 @@ def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         outputDir += "/"
     results = []
     intermed = []
-    origScores, initScore = computeModelScores( blocks, baseargs, 0 )
+    origScores, initScore = computeModelScores( blocks, baseargs, origModel, 0 )
 
     for hossLevel in blocks: # Assume blocks are in order of execution.
         optBlock = {}
@@ -633,7 +636,7 @@ def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         intermed.append( ret )
         baseargs["model"] = outputDir + baseargs["optfile"] # Apply heirarchy to opt
         results.append( score )
-    levelScores, totScore = computeModelScores( blocks, baseargs, time.time() - t0 )
+    levelScores, totScore = computeModelScores( blocks, baseargs, origModel, time.time() - t0 )
     destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
     if initScore < totScore:
         print( "Warning: hoss: init= {:.3f} < final= {:.3f}, algo = {}\nKnown problem with SLSQP. Setting output = input".format( initScore, totScore, baseargs["algorithm"]) )
@@ -643,15 +646,31 @@ def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         shutil.copyfile( baseargs["model"], outputDir + destfile )
     return levelScores, initScore, totScore
 
-def worker( baseargs, exptFile ):
+def worker( baseargs, exptFile, origModel = None ):
+    if baseargs['show_ticker']:
+        print( ".", end = "", flush=True )
+    modelFileSuffix = origModel.split( "." )[-1]
+    chemFile = None
+    if modelFileSuffix == 'py':
+        modelFile = origModel
+        if baseargs['model'].split( '.' )[-1] in ['g', 'xml', 'sbml']:
+            chemFile = baseargs["model"]
+            if not os.path.isfile(chemFile):
+                chemFile = baseargs["outputDir"] + baseargs["model"]
+                if not os.path.isfile(chemFile):
+                    raise OSError( "Hoss::worker: Could not find chemfile: " + chemFile )
+    else:
+        modelFile = baseargs["model"]
+    
     score, elapsedTime, diagnostics = findSim.innerMain( exptFile, 
             scoreFunc = baseargs["scoreFunc"],
-            modelFile = baseargs["model"], mapFile = baseargs["map"], 
+            modelFile = modelFile, mapFile = baseargs["map"], 
+            chemFile = chemFile,
             hidePlot = True, ignoreMissingObj = True, silent = True,
             solver = "LSODA", plots = False )
     return score
 
-def computeModelScores( blocks, baseargs, runtime, doPrint = False ):
+def computeModelScores( blocks, baseargs, origModel, runtime, doPrint = False ):
     MIN_BOUND = 1e-10
     MAX_BOUND = 1e6
     ret = 0.0
@@ -660,6 +679,8 @@ def computeModelScores( blocks, baseargs, runtime, doPrint = False ):
     totScore = 0.0
     flatScore = 0.0
     flatWt = 0.0
+    modelFileSuffix = origModel.split( "." )[-1]
+
     ed = baseargs["exptDir"]
     if len( ed ) > 0 and ed[-1] != "/":
         ed = ed + "/"
@@ -681,7 +702,7 @@ def computeModelScores( blocks, baseargs, runtime, doPrint = False ):
             else:
                 raise KeyError( "Missing Expt list in pathway " + expt )
             if len( exptList ) == 1:
-                pathwayScore = worker( baseargs, ed + exptList[0] )
+                pathwayScore = worker( baseargs, ed+exptList[0], origModel )
                 meanPathwayScore += pathwayScore
                 wt = expt[exptList[0]]["weight"]
                 flatScore += pathwayScore * pathwayScore * wt
@@ -690,7 +711,7 @@ def computeModelScores( blocks, baseargs, runtime, doPrint = False ):
             elif len( exptList ) > 1:
                 ret = []
                 for ee in exptList:
-                    ret.append( pool.apply_async(worker, args = (baseargs, ed + ee) ) )
+                    ret.append( pool.apply_async(worker, args = (baseargs, ed + ee, origModel) ) )
                 sumScore = 0.0
                 sumWts = 0.0
                 for rr, ee in zip( ret, exptList ):
@@ -797,7 +818,7 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     t0 = time.time()
 
     # First compute the original score. It may well be better.
-    origScores, initScore = computeModelScores( blocks, baseargs, 0 )
+    origScores, initScore = computeModelScores( blocks, baseargs, origModel, 0 )
     #quit()
     startModelList = [(origModel, 0.0)] # Model name and score
 
@@ -896,13 +917,15 @@ def runMCoptimizer(blocks, baseargs, parallelMode, blocksToRun, t0):
     print()
     for tt in range( numTopModels ):
         baseargs["model"] = "{}topN_{}_{:03d}.{}".format( outputDir, hierarchyLevel, tt, modelFileSuffix )
-        finalScores, finalTopnScore = computeModelScores( blocks, baseargs, time.time() - t0, doPrint = False )
+        finalScores, finalTopnScore = computeModelScores( blocks, baseargs,
+                origModel, time.time() - t0, doPrint = False )
         print( "final Score for topN{:03d} = {:.3f}".format( 
             tt, finalTopnScore ) )
 
     # Finally compute the end score. It should be a lot better.
     baseargs["model"] = "{}topN_{}_{:03d}.{}".format( outputDir, hierarchyLevel, 0, modelFileSuffix )
-    finalScores, finalTotScore = computeModelScores( blocks, baseargs, time.time() - t0, doPrint = False )
+    finalScores, finalTotScore = computeModelScores( blocks, baseargs, 
+            origModel, time.time() - t0, doPrint = False )
     print( "{}: hossMC: Init Score {:.3f}, Final = {:.3f}, Time = {:.3f}s".
             format( baseargs['optfile'], initScore, finalTotScore, 
             time.time() - t0 )
