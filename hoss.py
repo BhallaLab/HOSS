@@ -721,6 +721,9 @@ def computeModelScores( blocks, baseargs, origModel, runtime, doPrint = False ):
                     except multiprocessing.TimeoutError:
                         if baseargs["verbose"]:
                             print( "computeModelScores: timeoutError. Skipping: ", ee, flush = True )
+                    except Exception:
+                        if baseargs["verbose"]:
+                            print( "computeModelScores: Other error. Skipping: ", ee, flush = True )
                     else:
                         wt = expt[ee]["weight"]
                         sumScore += score * score * wt
