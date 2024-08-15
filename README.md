@@ -76,8 +76,8 @@ The FindSim code does the following:
 4. Optionally, it modifies parameters in the model, as required by the 
 	optimization routine.
 
-It is this *score* which the HOSS script uses as the objective function for 
-its optimization.
+It is this *score* which the HOSS script uses to compute the value of the 
+objective function for its optimization.
 
 Note that FindSim is agnostic to model type, and hence so is HOSS. At present
 they can work with HillTau and MOOSE models.
