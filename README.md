@@ -70,9 +70,11 @@ format. A FindSim file specifies:
 - A model on which this experiment can be run.
 
 The FindSim code does the following:
-1. Reads a FindSim file, a model, and various other optional arguments, 
+1. Reads a FindSim file, a model, and various other optional arguments. 
 2. Runs the model on the experiment definition
 3. Compares the model output to the experimental readouts defined in the file and returns a *score* which says how well the model output matched experiments.
+4. Optionally, it modifies parameters in the model, as required by the 
+	optimization routine.
 
 It is this *score* which the HOSS script uses as the objective function for 
 its optimization.
