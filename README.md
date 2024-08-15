@@ -15,10 +15,11 @@ processes are modular and signal flow in them is hierarchical. This
 makes it possible to break up large optimization problems into small modules
 such that each module that is optimized depends only on its own parameters, and
 the properties of upstream blocks. The upstream blocks are evaluated first, and
-held fixed as one goes successively deeper into the model. We have shown 
-mathematically that this is both *more efficient*, and gives *better fits*,
-than 'flat' optimization where the whole set of parameters is fitted at the 
-same time.
+held fixed as one goes successively deeper into the model. Our colleagues
+Radulescu and co-workers have shown mathematically that this is 
+both *more efficient*, and gives *better fits*, than 'flat' optimization where 
+the whole set of parameters is fitted at the same time. We have demonstrated
+that this is also true in practice on messy real-world optimization problems.
 
 The HOSS code performs simple hierarchical optimization, flat optimization,
 and two multi-start methods for optimization which use hierarchical optimization
