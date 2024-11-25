@@ -207,7 +207,7 @@ def dumbTicker( result ):
     #sys.stdout.flush()
 
 class EvalFunc:
-    def __init__( self, params, bounds, expts, pool, modelFile, mapFile, verbose, showTicker = True, solver = "gsl", timeout = None ):
+    def __init__( self, params, bounds, expts, pool, modelFile, mapFile, verbose, showTicker = True, solver = "lsoda", timeout = None ):
         # params specified as list of strings of form object.field 
         self.params = params
         # paramBounds specified as list of Bounds objects
@@ -449,7 +449,7 @@ def main():
     parser.add_argument( '-o', '--optfile', type = str, help='Optional: File name for saving optimized model', default = "" )
     parser.add_argument( '-r', '--resultfile', type = str, help='Optional: File name for saving results of simulation as a table of scale factors and scores.', default = "" )
     parser.add_argument( '-b', '--optblock', type = str, help='Optional: Block name to optimize in case we have loaded a Hoss.json file with multiple optimization blocks.', default = "" )
-    parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "gsl".', default = "gsl" )
+    parser.add_argument( '--solver', type = str, help='Optional: Numerical method to use for ODE solver. Ignored for HillTau models. Default = "lsoda".', default = "lsoda" )
     parser.add_argument( '-sf', '--scoreFunc', type = str, help='Optional: Function to use for scoring output of simulation.', default = "NRMS" )
     parser.add_argument( '-v', '--verbose', action="store_true", help="Flag: default False. When set, prints all sorts of warnings and diagnostics.")
     parser.add_argument( '-st', '--show_ticker', action="store_true", help="Flag: default False. Prints out ticker as optimization progresses.")
@@ -505,7 +505,7 @@ def findInitialParams( expts, modelFile, mapFile, paramArgs, solver ):
     return initParams
 
 
-def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "SLSQP", paramBounds = {}, solver = "gsl", timeout = None ):
+def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "SLSQP", paramBounds = {}, solver = "lsoda", timeout = None ):
     global ev
     t0 = time.time()
     pool = Pool( processes = len( expts ) )
