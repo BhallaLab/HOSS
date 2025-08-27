@@ -51,6 +51,7 @@ import time
 import json
 import findSim
 import multiprocessing
+import gc
 from multiprocessing import Pool
 
 defaultScoreFunc = "NRMS"
@@ -547,6 +548,12 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     ret = ev.doEval( [] )
     if ret < -0.1: # Got a negative score, ie, run failed somewhere.
         eret = [ { "expt":e[0], "weight":1, "score": ret, "initScore": 0} for e in ev.expts ]
+        ev.pool.close()
+        ev.pool.join()
+        del ev
+        del pool
+        del expts
+        gc.collect()
         return ( DummyResult(len(params) ), eret, time.time() - t0 )
     initScore = ev.score
     #print( "INIT SCORE = ", initScore )
@@ -573,6 +580,12 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     eret = [ { "expt":e[0], "weight":e[1], "score": s, "initScore": i} for e, s, i in zip( sorted(ev.expts), ev.score, initScore ) ]
     results.x = [ b.func( x ) for x, b in zip( results.x, ev.paramBounds ) ]
     results.initParams = initParams
+    ev.pool.close()
+    ev.pool.join()
+    del ev
+    del pool
+    del expts
+    gc.collect()
     return (results, eret, time.time() - t0 )
 
 def saveTweakedModelFile( args, params, x, fnames ):
