@@ -138,6 +138,8 @@ def validateMap( args, config ):
         print( "Error: Unable to find map file: " + mapFileName )
         quit()
     print( "Validated map file: ", mapFileName )
+    modelmap.pop( "FileType", None )
+    modelmap.pop( "Version", None )
     return modelmap
 
 def validateModel( args, config ):
@@ -239,16 +241,24 @@ def validateExperimentFiles( args, blocks, fsSchema ):
         quit()
     print( "\nValidated all {} named experiment files.".format( numExpts ) )
 
-def checkMapObjPresentInModel( modelMols, modelmap ):
+def checkMapObjPresentInModel( modelGroups, modelMols, modelmap ):
     fail = False
     newMapStr = "{"
     comma = ""
+    mols = 0
+    grps = 0
     for mapkey, mapList in modelmap.items():
-        good = 0
         newMapList = ""
         for mm in mapList:
             mmTail = mm.split( '/' )[-1]
             if mmTail in modelMols:
+                mols += 1
+                if newMapList == "":
+                    newMapList = '"{}"'.format( mm )
+                else:
+                    newMapList += ',"{}"'.format( mm )
+            elif mmTail in modelGroups:
+                grps += 1
                 if newMapList == "":
                     newMapList = '"{}"'.format( mm )
                 else:
@@ -256,7 +266,6 @@ def checkMapObjPresentInModel( modelMols, modelmap ):
             else:
                 print( 'Model obj not found for map entry "{}":["{}"]'.format(  mapkey, mm  ) )
                 fail = True
-                good += 1
         print( ".", end = "", flush=True)
         if newMapList != "":
             newMapStr += '{}\n\t"{}":[{}]'.format( comma, mapkey, newMapList)
@@ -267,7 +276,7 @@ def checkMapObjPresentInModel( modelMols, modelmap ):
             mapfile.write( newMapStr )
             mapfile.write( "\n}\n" )
         return
-    print( "\nValidated mapfile." )
+    print( f"\nValidated mapfile with {mols} molecules and {grps} groups" )
 
 
 def checkModelObjectsExist( blocks, modelmap, objFields, modelMols ):
@@ -296,7 +305,7 @@ def checkModelObjectsExist( blocks, modelmap, objFields, modelMols ):
                     if obj in objSet:
                         continue
                     objSet.add( obj )
-                    if (obj in modelmap) or (obj in modelMols):
+                    if (obj in modelmap):
                         if ok:
                             print( ".", end = "", flush=True)
                             if obj in modelmap:
@@ -309,6 +318,11 @@ def checkModelObjectsExist( blocks, modelmap, objFields, modelMols ):
                                 newMapStr += ']'
                             # Don't put in entry if obj already matches a name in modelMols.
                             numParams += 1
+                    elif obj in modelMols:
+                        print( "\nWarning: Obj '{}' in modelMols but not in mapfile: in pathway '{}' in block {}".format( obj, pname, idx+1 ) )
+                        newMapStr += '{}\n\t"{}":["{}"]'.format( comma, obj, obj)
+                        comma = ","
+                        fail = True
                     else:
                         print( "\nError: Missing Obj name in mapfile: '{}' in pathway '{}' in block {}".format( obj, pname, idx+1 ) )
                         newMapStr += '{}\n\t"{}":["{}"]'.format( comma, obj, obj)
@@ -372,7 +386,7 @@ def main():
     model, modelMols, objFields = validateModel( args, config )
 
     ## Check 0.3: Check that entities mentioned in mapfile exist in model.
-    checkMapObjPresentInModel( modelMols, modelmap )
+    checkMapObjPresentInModel( model['Groups'], modelMols, modelmap )
 
     blocks = config["HOSS"]
     ## Check 1: All hierarchyLevels are present, sequentially
