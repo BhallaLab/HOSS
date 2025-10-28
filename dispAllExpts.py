@@ -51,9 +51,9 @@ def logResult(result):
     # results is modified only by the main process, not the pool workers.
     results.append(result)
 
-def worker( fname, returnDict, scoreFunc, modelFile, mapFile, silent, solver, plots, hidePlot, weight ):
+def worker( fname, returnDict, scoreFunc, modelFile, mapFile, silent, solver, plots, hidePlot, weight, isConstraintExpt = False ):
     score, elapsedTime, diagnostics = findSim.innerMain( fname, scoreFunc = scoreFunc, modelFile = modelFile, mapFile = mapFile, hidePlot = hidePlot, ignoreMissingObj = True, silent = silent, solver = solver, plots = plots )
-    returnDict[fname] = (score, weight)
+    returnDict[fname] = (score, weight, isConstraintExpt )
 
 def main():
     parser = argparse.ArgumentParser( description = 
@@ -144,21 +144,28 @@ def innerMain( args ):
             jobs = []
             returnDict = manager.dict()
             for f in val: # Iterate through each expt (findsim.json)
+                isConstraintExpt = val[f].get( "isConstraintExpt", False )
                 fname = baseargs["exptDir"] + "/" + f
-                p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = baseargs["scoreFunc"], modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = baseargs["solver"], plots = args.plot, hidePlot = args.hidePlot, weight = val[f]["weight"] ) )
+                p = multiprocessing.Process( target = worker, args = ( fname, returnDict, ), kwargs = dict( scoreFunc = baseargs["scoreFunc"], modelFile = model, mapFile = mapfile, silent = not args.verbose, solver = baseargs["solver"], plots = args.plot, hidePlot = args.hidePlot, weight = val[f]["weight"], isConstraintExpt = isConstraintExpt ) )
                 jobs.append(p)
                 p.start()
             for proc in jobs:
                 proc.join()
+            prdScore = 1.0
             sumScore = 0.0
             sumWts = 0.0
-            for key, (score, wt) in returnDict.items():
+            flatSum = 0.0
+            for key, (score, wt, isConstraintExpt) in returnDict.items():
                 #print( "{:50s}{:.4f}".format( key, score ) )
-                sumScore += score * score * wt
-                sumWts += wt
-                flatScore += score * score * wt
-                flatWt += wt
-            pathwayScore = np.sqrt( sumScore / sumWts )
+                if isConstraintExpt:
+                    prdScore *= score * wt/100
+                else:
+                    sumScore += score * score * wt
+                    sumWts += wt
+                    flatSum += score * score * wt
+                    flatWt += wt
+            pathwayScore = np.sqrt( sumScore / sumWts ) * prdScore
+            flatScore += flatSum * prdScore
             sumPathwayScore += pathwayScore
             numPathways += 1
             if args.verbose or args.hidePlot:
@@ -173,17 +180,6 @@ def innerMain( args ):
         return np.sqrt( flatScore / flatWt ) if flatWt > 0.0 else -1.0
     else:
         return totScore / numTot if numTot > 0 else -1.0
-
-            #ret.append( pool.apply_async( findSim.innerMain, (fname,), dict( modelFile = model, mapFile = mapfile, hidePlot = False, silent = not args.verbose  ), callback = logResult ) )
-
-    #time.sleep(5)
-    #pool.close()
-    #pool.join()
-    #print(results)
-    #finished = [i.get() for i in ret]
-
-
-    #return model, mapfile, edict
         
 # Run the 'main' if this script is executed standalone.
 if __name__ == '__main__':

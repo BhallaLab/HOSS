@@ -93,7 +93,8 @@
 								"properties": {
 									"scoreFunc": {"type": "string" },
 									"weight": {"type": "number" },
-									"comment": {"type": "string" }
+									"comment": {"type": "string" },
+									"isConstraintExpt": {"type": "boolean", "default": false }
 								},
 								"required": ["weight"],
 								"additionalProperties": false
