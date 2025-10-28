@@ -210,12 +210,6 @@ def combineScores( eret ):
     if numSum == 0:
         return 0.0, 0.0
     else:
-        """
-        print( "----> IS={:.3f}   FS={:.3f}, finalSum={:.3f}, numSum={:.3f}".format( 
-            pow( initSum / numSum, 1.0/ScorePow ), 
-            pow( finalSum / numSum, 1.0/ScorePow ), 
-            finalSum, numSum ), flush = True )
-        """
         return pow( initSum / numSum, 1.0/ScorePow ), pow( finalSum / numSum, 1.0/ScorePow )
 
 
@@ -712,8 +706,10 @@ def computeModelScores( blocks, baseargs, origModel, runtime, doPrint = False ):
                 ret = []
                 for ee in exptList:
                     ret.append( pool.apply_async(worker, args = (baseargs, ed + ee, origModel) ) )
+                prdScore = 1.0
                 sumScore = 0.0
                 sumWts = 0.0
+                flatSum = 0.0
                 for rr, ee in zip( ret, exptList ):
                     try:
                         score = rr.get()
@@ -726,11 +722,16 @@ def computeModelScores( blocks, baseargs, origModel, runtime, doPrint = False ):
                             print( "computeModelScores: Other error. Skipping: ", ee, flush = True )
                     else:
                         wt = expt[ee]["weight"]
-                        sumScore += score * score * wt
-                        sumWts += wt
-                        flatScore += score * score * wt
-                        flatWt += wt
-                pathwayScore = np.sqrt( sumScore / sumWts )
+                        isConstraintExpt = expt[ee].get( "isConstraintExpt", False )
+                        if isConstraintExpt:
+                            prdScore *= score * wt/100
+                        else:
+                            sumScore += score * score * wt
+                            sumWts += wt
+                            flatSum += score * score * wt
+                            flatWt += wt
+                pathwayScore = np.sqrt( sumScore / sumWts ) * prdScore
+                flatScore += flatSum * prdScore
                 meanPathwayScore += pathwayScore
                 numPathways += 1
             else:
