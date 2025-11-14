@@ -89,18 +89,33 @@
 						"tolerance": { "type": "number" },
 						"algorithm": { "type": "string" },
 						"expt": {"type": "object",
-							"additionalProperties": { "type": "object",
-								"properties": {
-									"scoreFunc": {"type": "string" },
-									"weight": {"type": "number" },
-									"comment": {"type": "string" },
-									"isConstraintExpt": {"type": "boolean", "default": false }
-								},
-								"required": ["weight"],
-								"additionalProperties": false
-							},
-							"minProperties": 1
-						},
+							"additionalProperties": {
+                        		"oneOf": [
+                            		{
+                                		"type": "object",
+                                		"properties": {
+                                    		"scoreFunc": {"type": "string"},
+                                    		"weight": {"type": "number"},
+                                    		"comment": {"type": "string"}
+                                		},
+                                		"required": ["weight"],
+                                		"additionalProperties": false
+                            		},
+                            		{
+                                		"type": "object",
+                                		"properties": {
+                                    		"scoreFunc": {"type": "string"},
+                                    		"constraintThreshold": {"type": "number"},
+                                    		"weight": {"type": "number"},
+                                    		"comment": {"type": "string"}
+                                		},
+                                		"required": ["constraintThreshold"],
+                                		"additionalProperties": false
+                            		}
+                        		]
+                    		},
+                    		"minProperties": 1
+                		},
 						"params": { "type" : "array",
 								"items": { "type": "string" },
 								"minItems": 1

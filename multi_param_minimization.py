@@ -213,7 +213,10 @@ class EvalFunc:
         self.params = params
         # paramBounds specified as list of Bounds objects
         self.paramBounds = bounds
-        self.expts = expts # Each expt is ( exptFile, weight, scoreFunc )
+        # Each expt is ( exptFile, weight, [scoreFunc] )
+        self.expts = [ee for ee in expts if not ('constraintThreshold' in ee )]
+        # Each constraint is ( exptFile, constraintThreshold, [scoreFunc] )
+        self.constraints = [ee for ee in expts if ('constraintThreshold' in ee )]
         self.pool = pool # pool of available CPUs
         self.modelFile = modelFile
         self.mapFile = mapFile
@@ -244,7 +247,37 @@ class EvalFunc:
                 else:
                     print( " {} It={} ".format( self.numCalls, self.numIter, ) )
 
+    def doConstraintVec( self, x ):
+        scores, numFailures, runtime, loadtime, paramAccessTime, boundsPenalty = self.innerEval( self.constraints, x )
+        ret = []
+        for cc, ss in zip( self.constraints, scores ):
+            if ss >= 0: # Constraint should be >= 0. Bad score fails constr.
+                ret.append( cc['constraintThreshold'] - ss )
+            else:
+                ret.append( -1 )
+
+        self.constraintScore = scores
+        return ret
+
     def doEval( self, x ):
+        scores, numFailures, runtime, loadtime, paramAccessTime, boundsPenalty = self.innerEval( self.expts, x )
+        self.score = scores
+        self.runtime = runtime
+        self.loadtime = loadtime
+        self.paramAccessTime = paramAccessTime
+        if numFailures > 0:
+            return -1.0
+
+        sumScore = sum([ pow( s, ScorePow )*e['weight'] for s, e in zip(scores, self.expts) if s>=0.0])
+        sumWts = sum( [ e['weight'] for s, e in zip(scores, self.expts) if s>=0.0 ] )
+        ret = pow( sumScore/sumWts, 1.0/ScorePow )
+        #print( "ret = {:.3f}, penalty = {:.3f}, final score = {:.3f}".format( ret, boundsPenalty, ret + boundsPenalty ) )
+        self.sumScore = ret
+        self.boundsPenalty = boundsPenalty
+        #print( "doEval: ret={:.3f}, boundsPenalty={:.3f} ".format( ret, boundsPenalty) )
+        return ret + boundsPenalty
+
+    def innerEval( self, expts, x ):
         ret = []
         paramList = []
         boundsPenalty = 1.0     # It is a scaling factor.
@@ -271,37 +304,38 @@ class EvalFunc:
                 #paramList.append( field.encode( "ascii") )
                 paramList.append( b.func(j) )
 
-        if len( self.expts ) == 1:
-            k = self.expts[0]
-            ret.append( findSim.innerMain( k[0], scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose, solver = self.solver ))
-            self.ret = { e[0]:i for i, e in zip( ret, sorted(self.expts) ) }
+        if len( expts ) == 1:
+            k = expts[0]
+            scoreFunc = k.get('scoreFunc', 'NRMS' )
+            ret.append( findSim.innerMain( k['exptName'], scoreFunc = scoreFunc, modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose, solver = self.solver ))
+            self.ret = { e['exptName']:i for i, e in zip( ret, expts ) }
         else:
-            for k in sorted(self.expts):
-                ret.append( self.pool.apply_async( findSim.innerMain, (k[0],), dict(scoreFunc = k[2], modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose, solver = self.solver ), callback = dumbTicker ) )
-            self.ret = { e[0]:i.get() for i, e in zip( ret, sorted(self.expts) ) }
-        #print( "  = {} {}".format( len( ret ), ret ) )
-        self.score = []
+            for k in expts:  # expts is already sorted by exptName
+                scoreFunc = k.get('scoreFunc', 'NRMS' )
+                ret.append( self.pool.apply_async( findSim.innerMain, (k['exptName'],), dict(scoreFunc = scoreFunc, modelFile = self.modelFile, mapFile = self.mapFile, hidePlot=True, scaleParam=paramList, tabulateOutput = False, ignoreMissingObj = True, silent = not self.verbose, solver = self.solver ), callback = dumbTicker ) )
+            self.ret = { e['exptName']:rr.get() for rr, e in zip( ret, expts ) }
+
         numFailures = 0
+        runtime = 0.0
+        loadtime = 0.0
+        scores = []
+        paramAccessTime = 0.0
         for key in sorted( self.ret ):
             val = self.ret[key]
-            self.score.append( val[0] )
+            scores.append( val[0] )
             if val[0] < 0.0:
                 print( "Error: EvalFunc: Negative score {} on expt '{}'".format( val[0], key ) )
                 numFailures += 1
             else:
-                self.runtime += val[2]["runtime"]
-                self.loadtime += val[2]["loadtime"]
-                self.paramAccessTime += val[2]["paramAccessTime"]
-        if numFailures > 0:
-            return -1.0
-        sumScore = sum([ pow( s, ScorePow )*e[1] for s, e in zip(self.score, self.expts) if s>=0.0])
-        sumWts = sum( [ e[1] for s, e in zip(self.score, self.expts) if s>=0.0 ] )
-        ret = pow( sumScore/sumWts, 1.0/ScorePow )
-        #print( "ret = {:.3f}, penalty = {:.3f}, final score = {:.3f}".format( ret, boundsPenalty, ret + boundsPenalty ) )
-        self.sumScore = ret
-        self.boundsPenalty = boundsPenalty
-        #print( "doEval: ret={:.3f}, boundsPenalty={:.3f} ".format( ret, boundsPenalty) )
-        return ret + boundsPenalty
+                runtime += val[2]["runtime"]
+                loadtime += val[2]["loadtime"]
+                paramAccessTime += val[2]["paramAccessTime"]
+
+        return scores, numFailures, runtime, loadtime, paramAccessTime, boundsPenalty
+
+
+
+
 
 def optCallback( x ):
     global ev
@@ -414,14 +448,16 @@ def runJson( optName, optDict, args, isVerbose = False ):
 
     ed = args["exptDir"] + "/"
     expts = []
+    constraints = []
     #print( "{}".format( optDict["expt"] ))
     for key, val in optDict["expt"].items():
-        sf = scoreFunc
-        if "scoreFunc" in val:
-            sf = val["scoreFunc"]
-        expts.append( (ed + key, val["weight"], sf ) )
-        #print( "Expt {}   sf = {}".format( key, sf ) )
-    expts = sorted(expts)
+        val['exptName'] = ed + key
+        if not( 'weight' ) in val:
+            val['weight'] = 100.0
+        if not( 'scoreFunc' ) in val:
+            val['scoreFunc'] = scoreFunc
+        expts.append( val )
+    expts = sorted(expts, key=lambda x: x['exptName'])
     if "paramBounds" in optDict:
         paramBounds = { key: Bounds(val[0], val[1], val[2]) for key, val in optDict["paramBounds"].items() }
     else:
@@ -505,8 +541,15 @@ def findInitialParams( expts, modelFile, mapFile, paramArgs, solver ):
     '''
     return initParams
 
+def extractConstraintsFromExpts( expts ):
+    ret = []
+    cons = [
+        {'type': 'ineq', 'fun': constraint_ge_2},
+        {'type': 'ineq', 'fun': constraint_le_0}
+    ]
 
-def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "SLSQP", paramBounds = {}, solver = "lsoda", timeout = None ):
+
+def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showTicker = True, algorithm = "COBYLA", paramBounds = {}, solver = "lsoda", timeout = None ):
     global ev
     t0 = time.time()
     pool = Pool( processes = len( expts ) )
@@ -547,7 +590,7 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     # Generate the score for each expt for the initial condition
     ret = ev.doEval( [] )
     if ret < -0.1: # Got a negative score, ie, run failed somewhere.
-        eret = [ { "expt":e[0], "weight":1, "score": ret, "initScore": 0} for e in ev.expts ]
+        eret = [ { "expt":e['exptName'], "weight":1, "score": ret, "initScore": 0} for e in ev.expts ]
         ev.pool.close()
         ev.pool.join()
         del ev
@@ -570,14 +613,16 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
     
 
     # Do the minimization
-    if algorithm in ['COBYLA']:
-        callback = None
+    # For the constraint, the function has to return a numpy array
+    if algorithm in ['COBYLA', 'SLSQP', 'trust-constr']:
+        constraints = [{"type": "ineq", "fun": ev.doConstraintVec}]
+        results = optimize.minimize( ev.doEval, initVec, method= algorithm, tol = tolerance, callback = None, constraints = constraints )
     else:
         callback = optCallback
+        results = optimize.minimize( ev.doEval, initVec, method= algorithm, tol = tolerance, callback = optCallback )
 
     #print( "al = ", algorithm, "        sol = ", solver, "      tol = ", tolerance )
-    results = optimize.minimize( ev.doEval, initVec, method= algorithm, tol = tolerance, callback = callback )
-    eret = [ { "expt":e[0], "weight":e[1], "score": s, "initScore": i} for e, s, i in zip( sorted(ev.expts), ev.score, initScore ) ]
+    eret = [ { "expt":e['exptName'], "weight":e['weight'], "score": s, "initScore": i} for e, s, i in zip( ev.expts, ev.score, initScore ) ]
     results.x = [ b.func( x ) for x, b in zip( results.x, ev.paramBounds ) ]
     results.initParams = initParams
     ev.pool.close()

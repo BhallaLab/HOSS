@@ -706,7 +706,6 @@ def computeModelScores( blocks, baseargs, origModel, runtime, doPrint = False ):
                 ret = []
                 for ee in exptList:
                     ret.append( pool.apply_async(worker, args = (baseargs, ed + ee, origModel) ) )
-                prdScore = 1.0
                 sumScore = 0.0
                 sumWts = 0.0
                 flatSum = 0.0
@@ -720,18 +719,16 @@ def computeModelScores( blocks, baseargs, origModel, runtime, doPrint = False ):
                     except Exception:
                         if baseargs["verbose"]:
                             print( "computeModelScores: Other error. Skipping: ", ee, flush = True )
-                    else:
+                    constraintThreshold = expt[ee].get( 'constraintThreshold', None )
+                    if constraintThreshold == None: # not a constraint.
                         wt = expt[ee]["weight"]
-                        isConstraintExpt = expt[ee].get( "isConstraintExpt", False )
-                        if isConstraintExpt:
-                            prdScore *= score * wt/100
-                        else:
-                            sumScore += score * score * wt
-                            sumWts += wt
-                            flatSum += score * score * wt
-                            flatWt += wt
-                pathwayScore = np.sqrt( sumScore / sumWts ) * prdScore
-                flatScore += flatSum * prdScore
+                        sumScore += score * score * wt
+                        sumWts += wt
+                        flatSum += score * score * wt
+                        flatWt += wt
+
+                pathwayScore = np.sqrt( sumScore / sumWts )
+                flatScore += flatSum
                 meanPathwayScore += pathwayScore
                 numPathways += 1
             else:
