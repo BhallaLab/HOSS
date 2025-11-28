@@ -268,12 +268,23 @@ def processFinalResults( results, baseargs, intermed, t0 ):
 
 #######################################################################
 
+def prettyPrintVec( vec, numSig = 3 ):
+    ret = ""
+    for vv in vec:
+        ret += "{:.3f}, ".format( vv )
+    return ret
+
 def runOptSerial( optBlock, baseargs ):
     score = []
     #print( "Model = {}, optfile = {}".format( baseargs['model'], baseargs['optfile'] ) )
     for name, ob in optBlock.items():
         #print( "\n", name, ob, "\n###########################################" )
         score.append( multi_param_minimization.runJson(name, ob, baseargs ) )
+        if baseargs['algorithm'] == "COBYLA":
+            res = score[-1][0]
+            success= (res.success and res.status == 1 and res.maxcv < 1e-4)
+            if not success:
+                print( f"runOptSerial Failure: on '{name}' for {baseargs['resultFile']}\n Success= {res.success}, status = {res.status}, message = {res.message}, maxcv = {res.maxcv}\n preConstraints = {prettyPrintVec( res.preConstraintVec )}\n postx = {prettyPrintVec( res.x )}\n" )
         #print( "in runOptSerial" )
         initScore, optScore = combineScores (score[-1][1] )
         #print( "OptSerial {:20s} Init={:.3f}     Opt={:.3f}     Time={:.3f}s".format(name, initScore, optScore, score[-1][2] ) )
@@ -434,7 +445,12 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
     for idx, rr in enumerate( ret ):
         try:
             #print( "to get {} at time {:.3f}; startTime = {:.3f}".format( idx, time.time() - t0, time.time() - startTimes[idx] ), flush = True )
-            score.append( rr.get() )
+            ss = rr.get()
+            rv = ss[0] # This is the return value from scipy.minimize.
+            if rv.success and ( rv.status == 1 ): 
+                score.append( ss )
+            else:
+                score.append( None ) # Flag failure to meet constraints.
             #print( "got {} at time {:.3f}; startTime = {:.3f}".format( idx, time.time() - t0, time.time() - startTimes[idx] ), flush = True )
         except multiprocessing.TimeoutError:
             if baseargs["verbose"]:
@@ -762,12 +778,18 @@ def analyzeMCthreads( name, modelNum, hierarchyLevel, threadRet, numProcesses, p
         # rr[0] is the return scores array, rr[1] is baseargs["model"]
         # scores array is ( results, eret, time.time, paramArgs )
         # results.x is the solution vector
+        # results.success is a bool. It tells us if it worked.
         # eret =[{ "expt":e[0], "weight":1, "score": ret, "initScore": 0} for e in ev.expts ]
         optfile = rr[1].replace( scramDir, outputDir )
         fnames = { "model": rr[1], "optfile": optfile, "map": mapFile, "resultFile": "resultFile" }
         if numProcesses == 1:
             score = rr[0]
-            initScore, newScore = combineScores( score[1] )
+            print( f"analyzeMCthreads: on '{name}', '{rr[1]}' at level {hierarchyLevel}\n Success= {score[0].success}, status = {score[0].status}, message = {score[0].message}" )
+            if score[0].success:
+                initScore, newScore = combineScores( score[1] )
+            else:
+                print( f"analyzeMCthreads: Optimization failed, possible constraint violation on '{name}', '{rr[1]}' at level {hierarchyLevel}" )
+                newScore = 1e9
             #print( "single proc" )
         else:
             #print( "num proc = ", numProcesses )
@@ -780,8 +802,14 @@ def analyzeMCthreads( name, modelNum, hierarchyLevel, threadRet, numProcesses, p
                 # Copy the source file to the output file as a dummy.
                 shutil.copyfile( rr[1], optfile )
             else:
-                initScore, newScore = combineScores( score[1] )
-                multi_param_minimization.saveTweakedModelFile( {}, score[3], score[0]["x"], fnames )
+                if score[0].success:
+                    initScore, newScore = combineScores( score[1] )
+                    multi_param_minimization.saveTweakedModelFile( {}, score[3], score[0]["x"], fnames )
+                else:
+                    # Copy the source file to the output file as a dummy.
+                    shutil.copyfile( rr[1], optfile )
+                    print( f"analyzeMCthreads: Optimization failed, possible constraint violation on '{name}', '{rr[1]}' at level {hierarchyLevel}" )
+                    newScore = 1e9
 
         print( ".", end = "", flush=True)
         pathwayScores[name].append( 

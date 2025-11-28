@@ -623,6 +623,10 @@ def innerMain( paramArgs, expts, modelFile, mapFile, isVerbose, tolerance, showT
 
     #print( "al = ", algorithm, "        sol = ", solver, "      tol = ", tolerance )
     eret = [ { "expt":e['exptName'], "weight":e['weight'], "score": s, "initScore": i} for e, s, i in zip( ev.expts, ev.score, initScore ) ]
+    # Note that the doConstraintVec function uses the parmBounded x values.
+    results.preConstraintVec = ev.doConstraintVec( results.x )
+    results.preX = np.array( results.x )
+    # Convert back to regular param ranges.
     results.x = [ b.func( x ) for x, b in zip( results.x, ev.paramBounds ) ]
     results.initParams = initParams
     ev.pool.close()
