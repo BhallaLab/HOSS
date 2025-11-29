@@ -276,9 +276,8 @@ def prettyPrintVec( vec, numSig = 3 ):
 
 def runOptSerial( optBlock, baseargs ):
     score = []
-    #print( "Model = {}, optfile = {}".format( baseargs['model'], baseargs['optfile'] ) )
+    success = True
     for name, ob in optBlock.items():
-        #print( "\n", name, ob, "\n###########################################" )
         score.append( multi_param_minimization.runJson(name, ob, baseargs ) )
         if baseargs['algorithm'] == "COBYLA":
             res = score[-1][0]
@@ -286,12 +285,11 @@ def runOptSerial( optBlock, baseargs ):
             if not success:
                 print( f"runOptSerial Failure: on '{name}' for {baseargs['resultFile']}\n Success= {res.success}, status = {res.status}, message = {res.message}, maxcv = {res.maxcv}\n preConstraints = {prettyPrintVec( res.preConstraintVec )}\n postx = {prettyPrintVec( res.x )}\n" )
         #print( "in runOptSerial" )
-        initScore, optScore = combineScores (score[-1][1] )
+        # initScore, optScore = combineScores (score[-1][1] )
         #print( "OptSerial {:20s} Init={:.3f}     Opt={:.3f}     Time={:.3f}s".format(name, initScore, optScore, score[-1][2] ) )
         # optScore == score[-1][0].fun
 
-    #print( "Serial SCORE = ", [ss[0].fun for ss in score] )
-    return score
+    return success, score
 
 def ticker( arg ):
     return
@@ -302,6 +300,7 @@ def runOptThreads( optBlock, baseargs ):
         numProcesses = max( multiprocessing.cpu_count()//8, 1)
     numProcesses = min( numProcesses, len(optBlock) )
 
+    success = True  # For now we don't check constraint success.
     pool = multiprocessing.Pool( processes = numProcesses )
     ret = []
     for name, ob in optBlock.items():
@@ -316,7 +315,7 @@ def runOptThreads( optBlock, baseargs ):
                 print( "Warning: Timeout in runOptThreads. Skipping pathway")
 
     #print( "Thread SCORE = ", [ss[0].fun for ss in score] )
-    return score
+    return success, score
 
 def runOptMPI( optBlock, baseargs ):
     print( "MPI version not yet implemented, using serial version")
@@ -445,10 +444,9 @@ def runInitScramThenOptimize( blocks, baseargs, t0 ):
     for idx, rr in enumerate( ret ):
         try:
             #print( "to get {} at time {:.3f}; startTime = {:.3f}".format( idx, time.time() - t0, time.time() - startTimes[idx] ), flush = True )
-            ss = rr.get()
-            rv = ss[0] # This is the return value from scipy.minimize.
-            if rv.success and ( rv.status == 1 ): 
-                score.append( ss )
+            (success, levelScores) = rr.get()
+            if success:
+                score.append( levelScores )
             else:
                 score.append( None ) # Flag failure to meet constraints.
             #print( "got {} at time {:.3f}; startTime = {:.3f}".format( idx, time.time() - t0, time.time() - startTimes[idx] ), flush = True )
@@ -495,12 +493,12 @@ def wrapRunOptimizer( blocks, baseargs, idx, t0 ):
     currProc = multiprocessing.current_process()
     currProc.daemon = False  # This allows nested multiprocessing.
     if baseargs["method"] == "initScram":
-        levelScores, initScore, optScore = runHossOptimizer( 
+        success, levelScores, initScore, optScore = runHossOptimizer( 
                 blocks, baseargs, "serial", [], time.time(), idx )
     elif baseargs["method"] == "initScramFlat":
-        levelScores, initScore, optScore = runFlatOptimizer( 
+        success, levelScores, initScore, optScore = runFlatOptimizer( 
                 blocks, baseargs, "serial", [], time.time(), idx )
-    return levelScores
+    return (success, levelScores)
 
 #######################################################################
 
@@ -562,12 +560,13 @@ def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     # We can run items in a block in any order, but the whole block
     # must be wrapped up before we go to the next level of heirarchy.
     t1 = time.time()
+    success = True
     if parallelMode == "serial":
-        score = runOptSerial( flatBlock, baseargs )
+        success, score = runOptSerial( flatBlock, baseargs )
     elif parallelMode == "threads":
-        score = runOptThreads( flatBlock, baseargs )
+        success, score = runOptThreads( flatBlock, baseargs )
     elif parallelMode == "MPI":
-        score = runOptMPI( flatBlock, baseargs )
+        success, score = runOptMPI( flatBlock, baseargs )
     t2 = time.time()
     # This saves the scores and the intermediate opt file, to use for
     # next level of optimization.
@@ -582,13 +581,17 @@ def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     levelScores, totScore = computeModelScores( newblocks, baseargs, 
             origModel, time.time() - t0 )
     destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
-    if initScore < totScore:
+    if not success:
+        print( "Warning: flat: Failed, probably constraint error. Algo = {}. Setting output = input".format( baseargs["algorithm"]) )
+        shutil.copyfile( origModel, outputDir + destfile )
+        return success, levelScores, initScore, initScore
+    elif initScore < totScore:
         print( "Warning: flat: init= {:.3f} < final= {:.3f}, algo = {}\nKnown problem with SLSQP. Setting output = input".format( initScore, totScore, baseargs["algorithm"]) )
         shutil.copyfile( origModel, outputDir + destfile )
-        return levelScores, initScore, initScore
+        return success, levelScores, initScore, initScore
     else:
         shutil.copyfile( baseargs["model"], outputDir + destfile )
-    return levelScores, initScore, totScore
+    return success, levelScores, initScore, totScore
 
 def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0, 
         idx = None ):
@@ -601,6 +604,7 @@ def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     intermed = []
     origScores, initScore = computeModelScores( blocks, baseargs, origModel, 0 )
 
+    success = True
     for hossLevel in blocks: # Assume blocks are in order of execution.
         optBlock = {}
         hl = hossLevel["hierarchyLevel"]
@@ -633,11 +637,11 @@ def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         # must be wrapped up before we go to the next level of heirarchy.
         t1 = time.time()
         if parallelMode == "serial":
-            score = runOptSerial( optBlock, baseargs )
+            success, score = runOptSerial( optBlock, baseargs )
         elif parallelMode == "threads":
-            score = runOptThreads( optBlock, baseargs )
+            success, score = runOptThreads( optBlock, baseargs )
         elif parallelMode == "MPI":
-            score = runOptMPI( optBlock, baseargs )
+            success, score = runOptMPI( optBlock, baseargs )
         t2 = time.time()
         # This saves the scores and the intermediate opt file, to use for
         # next level of optimization.
@@ -646,15 +650,21 @@ def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
         intermed.append( ret )
         baseargs["model"] = outputDir + baseargs["optfile"] # Apply heirarchy to opt
         results.append( score )
+        if not success:
+            break
     levelScores, totScore = computeModelScores( blocks, baseargs, origModel, time.time() - t0 )
     destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
-    if initScore < totScore:
+    if not success:
+        print( "Warning: hoss: Failed, probably constraint error. algo = {}Setting output = input".format( baseargs["algorithm"]) )
+        shutil.copyfile( origModel, outputDir + destfile )
+        return success, levelScores, initScore, initScore
+    elif initScore < totScore:
         print( "Warning: hoss: init= {:.3f} < final= {:.3f}, algo = {}\nKnown problem with SLSQP. Setting output = input".format( initScore, totScore, baseargs["algorithm"]) )
         shutil.copyfile( origModel, outputDir + destfile )
-        return levelScores, initScore, initScore
+        return success, levelScores, initScore, initScore
     else:
         shutil.copyfile( baseargs["model"], outputDir + destfile )
-    return levelScores, initScore, totScore
+    return success, levelScores, initScore, totScore
 
 def worker( baseargs, exptFile, origModel = None ):
     if baseargs['show_ticker']:
