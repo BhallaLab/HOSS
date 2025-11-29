@@ -583,11 +583,11 @@ def runFlatOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
     if not success:
         print( "Warning: flat: Failed, probably constraint error. Algo = {}. Setting output = input".format( baseargs["algorithm"]) )
-        shutil.copyfile( origModel, outputDir + destfile )
+        shutil.copyfile( origModel, outputDir + "FAIL_" + destfile )
         return success, levelScores, initScore, initScore
     elif initScore < totScore:
         print( "Warning: flat: init= {:.3f} < final= {:.3f}, algo = {}\nKnown problem with SLSQP. Setting output = input".format( initScore, totScore, baseargs["algorithm"]) )
-        shutil.copyfile( origModel, outputDir + destfile )
+        shutil.copyfile( origModel, outputDir + "NOT_" + destfile )
         return success, levelScores, initScore, initScore
     else:
         shutil.copyfile( baseargs["model"], outputDir + destfile )
@@ -656,11 +656,11 @@ def runHossOptimizer( blocks, baseargs, parallelMode, blocksToRun, t0,
     destfile = "{}_{:03d}.{}".format( OptModelFname, idx, modelFileSuffix ) if idx != None else "{}_000.{}".format( OptModelFname, modelFileSuffix )
     if not success:
         print( "Warning: hoss: Failed, probably constraint error. algo = {}Setting output = input".format( baseargs["algorithm"]) )
-        shutil.copyfile( origModel, outputDir + destfile )
+        shutil.copyfile( origModel, outputDir + "FAIL_" + destfile )
         return success, levelScores, initScore, initScore
     elif initScore < totScore:
         print( "Warning: hoss: init= {:.3f} < final= {:.3f}, algo = {}\nKnown problem with SLSQP. Setting output = input".format( initScore, totScore, baseargs["algorithm"]) )
-        shutil.copyfile( origModel, outputDir + destfile )
+        shutil.copyfile( origModel, outputDir + "NOT_" + destfile )
         return success, levelScores, initScore, initScore
     else:
         shutil.copyfile( baseargs["model"], outputDir + destfile )
